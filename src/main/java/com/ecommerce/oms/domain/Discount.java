@@ -26,7 +26,7 @@ public class Discount {
     @Column(nullable = false)
     private DiscountType type;
 
-    @Column(nullable = false, precision = 38, scale = 2)
+    @Column(name = "discount_value", nullable = false, precision = 38, scale = 2)
     private BigDecimal value;
 
     @Column(name = "valid_from", nullable = false)

@@ -87,7 +87,7 @@ CREATE TABLE discounts (
     id UUID PRIMARY KEY,
     code VARCHAR(100) NOT NULL UNIQUE,
     type VARCHAR(50) NOT NULL CHECK (type IN ('PERCENTAGE', 'FLAT')),
-    value NUMERIC(38, 2) NOT NULL,
+    discount_value NUMERIC(38, 2) NOT NULL,
     valid_from TIMESTAMP WITH TIME ZONE NOT NULL,
     valid_to TIMESTAMP WITH TIME ZONE NOT NULL,
     min_order_value NUMERIC(38, 2) NOT NULL DEFAULT 0.00,
