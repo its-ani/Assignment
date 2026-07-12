@@ -1,0 +1,114 @@
+CREATE TABLE users (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL CHECK (role IN ('ADMIN', 'CUSTOMER', 'WAREHOUSE_STAFF')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE categories (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    parent_category_id UUID REFERENCES categories(id) ON DELETE SET NULL
+);
+
+CREATE TABLE products (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    category_id UUID NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+    price NUMERIC(38, 2) NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE warehouses (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    location VARCHAR(255) NOT NULL
+);
+
+CREATE TABLE inventory_items (
+    id UUID PRIMARY KEY,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    warehouse_id UUID NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+    quantity_on_hand INT NOT NULL DEFAULT 0,
+    quantity_reserved INT NOT NULL DEFAULT 0,
+    version BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT uq_product_warehouse UNIQUE (product_id, warehouse_id)
+);
+
+CREATE TABLE carts (
+    id UUID PRIMARY KEY,
+    customer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL CHECK (status IN ('ACTIVE', 'CHECKED_OUT')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE cart_items (
+    id UUID PRIMARY KEY,
+    cart_id UUID NOT NULL REFERENCES carts(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    CONSTRAINT uq_cart_product UNIQUE (cart_id, product_id)
+);
+
+CREATE TABLE orders (
+    id UUID PRIMARY KEY,
+    customer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    status VARCHAR(50) NOT NULL CHECK (status IN ('PLACED', 'CONFIRMED', 'PACKED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED')),
+    total_amount NUMERIC(38, 2) NOT NULL,
+    discount_amount NUMERIC(38, 2) NOT NULL DEFAULT 0.00,
+    tax_amount NUMERIC(38, 2) NOT NULL DEFAULT 0.00,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE order_items (
+    id UUID PRIMARY KEY,
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    warehouse_id UUID REFERENCES warehouses(id) ON DELETE SET NULL,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    unit_price NUMERIC(38, 2) NOT NULL
+);
+
+CREATE TABLE payments (
+    id UUID PRIMARY KEY,
+    order_id UUID NOT NULL UNIQUE REFERENCES orders(id) ON DELETE RESTRICT,
+    status VARCHAR(50) NOT NULL CHECK (status IN ('PENDING', 'SUCCESS', 'FAILED', 'REFUNDED')),
+    amount NUMERIC(38, 2) NOT NULL,
+    method VARCHAR(50) NOT NULL,
+    transaction_ref VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE discounts (
+    id UUID PRIMARY KEY,
+    code VARCHAR(100) NOT NULL UNIQUE,
+    type VARCHAR(50) NOT NULL CHECK (type IN ('PERCENTAGE', 'FLAT')),
+    value NUMERIC(38, 2) NOT NULL,
+    valid_from TIMESTAMP WITH TIME ZONE NOT NULL,
+    valid_to TIMESTAMP WITH TIME ZONE NOT NULL,
+    min_order_value NUMERIC(38, 2) NOT NULL DEFAULT 0.00,
+    active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE return_requests (
+    id UUID PRIMARY KEY,
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE RESTRICT,
+    order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE RESTRICT,
+    reason VARCHAR(500) NOT NULL,
+    status VARCHAR(50) NOT NULL CHECK (status IN ('REQUESTED', 'APPROVED', 'REJECTED', 'REFUNDED')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY,
+    entity_type VARCHAR(100) NOT NULL,
+    entity_id UUID NOT NULL,
+    action VARCHAR(100) NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    metadata TEXT
+);
