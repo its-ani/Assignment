@@ -6,24 +6,24 @@ This is a Spring Boot based E-Commerce Order Management System (OMS) designed to
 ## Tech Stack
 - **Java**: Version 17+ (e.g. Java 23)
 - **Framework**: Spring Boot 3.3.x (Web, JPA)
-- **Database**: PostgreSQL (Development/Production), H2 (In-memory, Testing)
+- **Database**: MySQL (Development/Production), H2 (In-memory, Testing)
 - **Schema Management**: Flyway Migrations
 - **Utilities**: Lombok, Springdoc-OpenAPI (Swagger UI)
 - **Build Tool**: Maven
 
 ## Getting Started
 
-### Local PostgreSQL Setup
-To run PostgreSQL locally, you can use Docker:
+### Local MySQL Setup
+To run MySQL locally, you can use Docker:
 ```bash
-docker run --name oms-postgres -e POSTGRES_DB=oms_db -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:15
+docker run --name oms-mysql -e MYSQL_DATABASE=oms_db -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql:8.0
 ```
 
 ### Environment Variables
 The application uses the following environment variables (with default values for development):
-- `DB_URL`: JDBC database URL (default: `jdbc:postgresql://localhost:5432/oms_db`)
-- `DB_USERNAME`: Database username (default: `postgres`)
-- `DB_PASSWORD`: Database password (default: `postgres`)
+- `DB_URL`: JDBC database URL (default: `jdbc:mysql://localhost:3306/oms_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true`)
+- `DB_USERNAME`: Database username (default: `root`)
+- `DB_PASSWORD`: Database password (default: `password`)
 
 ### Running the Application
 To run the application with the development profile (default):
@@ -51,7 +51,8 @@ To run tests using the in-memory H2 database under the `test` profile:
 - **Phase 11**: Production Deployment & Optimization (Pending)
 
 ## Assumptions Log (Phase 1)
-- **ID Generation Strategy**: UUID is used for all primary keys to guarantee distributed system capability and prevent ID enumeration attacks (e.g., exposing total number of orders/users).
+- **Primary Database Engine**: MySQL is selected as the primary relational database.
+- **ID Generation Strategy**: UUID is used for all primary keys. Since MySQL does not support a native `UUID` type, they are stored as `VARCHAR(36)` strings. This is highly portable, human-readable, and compatible with both MySQL and H2 databases.
 - **Concurrency Locking Strategy**: Leaning towards **Optimistic Locking** on `InventoryItem` using a `@Version` field (`version` column) to support high-throughput checkout updates while avoiding database deadlocks associated with pessimistic locking.
-- **AuditLog Metadata**: Stored as a `TEXT` data type containing a serialized JSON string to maximize database compatibility between PostgreSQL and H2 without relying on vendor-specific JSONB dialect configurations.
-- **SQL Keyword Resolution**: Renamed the `value` column in the `discounts` table to `discount_value` on the database level, but mapped it to the Java field `value` to avoid H2 parser errors on the reserved SQL keyword `value`.
+- **AuditLog Metadata**: Stored as a `TEXT` data type containing a serialized JSON string to maximize database compatibility between MySQL and H2 without relying on vendor-specific JSONB dialect configurations.
+- **SQL Keyword Resolution**: Renamed the `value` column in the `discounts` table to `discount_value` on the database level, but mapped it to the Java field `value` to avoid parser errors on the reserved SQL keyword `value`.

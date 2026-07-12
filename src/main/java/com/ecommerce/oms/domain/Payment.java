@@ -17,10 +17,11 @@ public class Payment {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(columnDefinition = "VARCHAR(36)")
     private UUID id;
 
     @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "order_id", nullable = false, unique = true)
+    @JoinColumn(name = "order_id", nullable = false, unique = true, columnDefinition = "VARCHAR(36)")
     private Order order;
 
     @Enumerated(EnumType.STRING)

@@ -18,14 +18,15 @@ public class InventoryItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(columnDefinition = "VARCHAR(36)")
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id", nullable = false)
+    @JoinColumn(name = "product_id", nullable = false, columnDefinition = "VARCHAR(36)")
     private Product product;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "warehouse_id", nullable = false)
+    @JoinColumn(name = "warehouse_id", nullable = false, columnDefinition = "VARCHAR(36)")
     private Warehouse warehouse;
 
     @Column(name = "quantity_on_hand", nullable = false)

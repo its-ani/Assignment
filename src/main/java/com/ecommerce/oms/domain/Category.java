@@ -15,13 +15,14 @@ public class Category {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(columnDefinition = "VARCHAR(36)")
     private UUID id;
 
     @Column(nullable = false)
     private String name;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "parent_category_id")
+    @JoinColumn(name = "parent_category_id", columnDefinition = "VARCHAR(36)")
     private Category parentCategory;
 
     @Override

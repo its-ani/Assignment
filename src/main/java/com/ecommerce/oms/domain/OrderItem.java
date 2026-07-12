@@ -16,18 +16,19 @@ public class OrderItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(columnDefinition = "VARCHAR(36)")
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "order_id", nullable = false)
+    @JoinColumn(name = "order_id", nullable = false, columnDefinition = "VARCHAR(36)")
     private Order order;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id", nullable = false)
+    @JoinColumn(name = "product_id", nullable = false, columnDefinition = "VARCHAR(36)")
     private Product product;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "warehouse_id")
+    @JoinColumn(name = "warehouse_id", columnDefinition = "VARCHAR(36)")
     private Warehouse warehouse;
 
     @Column(nullable = false)

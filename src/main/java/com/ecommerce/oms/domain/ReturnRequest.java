@@ -16,14 +16,15 @@ public class ReturnRequest {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(columnDefinition = "VARCHAR(36)")
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "order_id", nullable = false)
+    @JoinColumn(name = "order_id", nullable = false, columnDefinition = "VARCHAR(36)")
     private Order order;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "order_item_id", nullable = false)
+    @JoinColumn(name = "order_item_id", nullable = false, columnDefinition = "VARCHAR(36)")
     private OrderItem orderItem;
 
     @Column(nullable = false)

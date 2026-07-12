@@ -16,12 +16,13 @@ public class AuditLog {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(columnDefinition = "VARCHAR(36)")
     private UUID id;
 
     @Column(name = "entity_type", nullable = false)
     private String entityType;
 
-    @Column(name = "entity_id", nullable = false)
+    @Column(name = "entity_id", nullable = false, columnDefinition = "VARCHAR(36)")
     private UUID entityId;
 
     @Column(nullable = false)

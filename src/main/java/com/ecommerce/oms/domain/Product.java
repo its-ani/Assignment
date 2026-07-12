@@ -17,6 +17,7 @@ public class Product {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(columnDefinition = "VARCHAR(36)")
     private UUID id;
 
     @Column(nullable = false)
@@ -25,7 +26,7 @@ public class Product {
     private String description;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "category_id", nullable = false)
+    @JoinColumn(name = "category_id", nullable = false, columnDefinition = "VARCHAR(36)")
     private Category category;
 
     @Column(nullable = false, precision = 38, scale = 2)
