@@ -44,11 +44,12 @@ To run tests using the in-memory H2 database under the `test` profile:
 - **Phase 4**: Inventory & Warehouse Management (Pending)
 - **Phase 5**: Cart Operations & Price Calculation (Pending)
 - **Phase 6**: Order Placement & Checkout Transaction (Completed)
-- **Phase 7**: State Machine for Order Lifecycle (Pending)
-- **Phase 8**: Returns Processing & Refunds (Pending)
-- **Phase 9**: Payment Integration & Audit Logs (Pending)
+- **Phase 7**: State Machine for Order Lifecycle (Completed)
+- **Phase 8**: Order Lifecycle & Fulfillment Status Management (Completed)
+- **Phase 9**: Returns Processing & Refunds (Pending)
 - **Phase 10**: OpenAPI Documentation & End-to-End Tests (Pending)
 - **Phase 11**: Production Deployment & Optimization (Pending)
+
 
 ## Authentication & RBAC (Phase 2)
 
@@ -361,6 +362,63 @@ Response:
 }
 ```
 
+## Order Lifecycle & Fulfillment (Phase 8)
+
+### Features & Security Access
+- **State Machine Transitions**: Enforces a strict status sequence: `PLACED -> CONFIRMED -> PACKED -> SHIPPED -> DELIVERED`.
+- **Pre-packing Cancellation Window**: Customers can self-service cancel orders only while they are in `PLACED` or `CONFIRMED` status. Once `PACKED`, cancellation is blocked.
+- **Inventory Reservation Release**: Cancelling an order automatically releases the reserved product stocks across warehouses, decrementing `quantityReserved` on `InventoryItem` records.
+- **Role-based Access Control (RBAC)**:
+  - `CUSTOMER`: Can query their own orders and details (paginated and filterable). Access to other customer orders returns `404 Not Found` to prevent ID enumeration. Can self-cancel pre-packing.
+  - `WAREHOUSE_STAFF`: Can view all orders and advance the status forward (`PLACED -> CONFIRMED -> PACKED -> SHIPPED -> DELIVERED`). Cannot cancel orders.
+  - `ADMIN`: Full access. Can view/list any order, advance statuses, and force-cancel orders at any stage prior to delivery.
+- **Async Event Pipeline**: Successful status transitions publish `OrderStatusChangedEvent`. An asynchronous listener intercepts the event post-commit (`AFTER_COMMIT`) to simulate customer notifications and record structured `AuditLog` entries.
+
+### Order Status State Machine Diagram
+```text
+  [ PLACED ] ---------(Customer / Admin Cancel)---------> [ CANCELLED ]
+      |                                                        ^
+(Warehouse / Admin)                                            |
+      v                                                        |
+[ CONFIRMED ] -------(Customer / Admin Cancel)-----------------+
+      |
+(Warehouse / Admin)
+      v
+  [ PACKED ] 
+      |
+(Warehouse / Admin)
+      v
+ [ SHIPPED ] ---------(Admin Force Cancel Override)------------+
+      |
+(Warehouse / Admin)
+      v
+[ DELIVERED ]
+```
+
+### API Usage Examples (cURL)
+
+#### 1. List Own Orders (Customer Only)
+```bash
+curl -X GET "http://localhost:8080/api/v1/orders?status=PLACED&page=0&size=10" \
+  -H "Authorization: Bearer <customer_jwt_token>"
+```
+
+#### 2. Self-Service Cancel Order (Customer Only)
+```bash
+curl -X POST http://localhost:8080/api/v1/orders/<order_id>/cancel \
+  -H "Authorization: Bearer <customer_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Wrong item selected"}'
+```
+
+#### 3. Update Order Status (Warehouse Staff / Admin Only)
+```bash
+curl -X PATCH http://localhost:8080/api/v1/orders/<order_id>/status \
+  -H "Authorization: Bearer <staff_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"newStatus": "PACKED"}'
+```
+
 ## Assumptions Log
 
 ### Phase 1 Assumptions
@@ -401,6 +459,12 @@ Response:
 - **Explicit Compensation for Stock**: Since reservation transactions commit independently, we explicitly catch payment failures or other checkout errors and run compensation logic to release reserved stock.
 - **Simulated Payment Gateway**: Payments are processed synchronously via a configurable mock service. Successful payments advance order status to `PLACED`, leaving the advance to `CONFIRMED` to the downstream fulfillment state machine (Phase 8).
 - **Tax Rate Placeholder**: Flat 10% tax rate is applied to the subtotal. Real discount logic is deferred to Phase 9.
+
+### Phase 8 Assumptions
+- **404 vs 403 on Cross-Customer Detail Views**: To prevent information leakage (e.g., confirming the existence of a valid order ID to non-owners), we return `404 Not Found` (instead of `403 Forbidden`) if a customer attempts to query or cancel an order that belongs to another customer.
+- **ADMIN Override Power**: Administrators are given broader capabilities to cancel orders at any stage prior to delivery (`PLACED`, `CONFIRMED`, `PACKED`, `SHIPPED`). Doing so releases reserved warehouse stock. Warehouse staff cannot perform cancellations.
+- **Selective customerId Serialization**: The `customerId` field in `OrderSummaryResponse` is serialized only for staff and administrator queries. In order summary lists returned to customers, the `customerId` is set to `null` and excluded in output serialization via Jackson `@JsonInclude(NON_NULL)`.
+
 
 
 
