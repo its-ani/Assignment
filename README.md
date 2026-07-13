@@ -419,6 +419,75 @@ curl -X PATCH http://localhost:8080/api/v1/orders/<order_id>/status \
   -d '{"newStatus": "PACKED"}'
 ```
 
+## Discount Codes & Tax Calculation (Phase 9)
+
+Integrates discount management and proper tax calculation into checkout:
+- **Order of Operations**: `Subtotal` (from cart item catalog prices) $\rightarrow$ Apply `Discount` $\rightarrow$ Compute `Tax` on the post-discount subtotal amount $\rightarrow$ Final `Total` = `Subtotal` - `Discount` + `Tax`.
+- **Tax Rate Configuration**: The tax rate is configurable globally via the `app.tax-rate` property (fallback to `0.10` / 10%).
+- **Discount Validation Rules**:
+  - Code must exist and be active.
+  - Current date/time must fall within `[validFrom, validTo]`.
+  - Cart subtotal must meet or exceed `minOrderValue`.
+  - **Anti-Abuse Rule**: A discount code can be used at most **once per customer** (non-cancelled orders).
+  - Discount is capped at the subtotal amount (order cannot have a negative total).
+- **Concurrency Safeguards**: Checkout transaction isolation retry boundaries and stock compensation logic from Phase 6 are fully preserved and unaffected.
+
+### Endpoints & Payloads
+
+#### 1. Preview/Validate Discount (Customer / Admin)
+```bash
+curl -X GET "http://localhost:8080/api/v1/discounts/validate?code=SAVE20&cartTotal=150.00" \
+  -H "Authorization: Bearer <customer_jwt_token>"
+```
+**Response (200 OK)**:
+```json
+{
+  "code": "SAVE20",
+  "type": "PERCENTAGE",
+  "value": 20.00,
+  "discountAmount": 30.00,
+  "eligible": true
+}
+```
+
+#### 2. Create Discount Code (Admin Only)
+```bash
+curl -X POST http://localhost:8080/api/v1/discounts \
+  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "SAVE10",
+    "type": "PERCENTAGE",
+    "value": 10.00,
+    "validFrom": "2026-07-01T00:00:00Z",
+    "validTo": "2026-07-31T23:59:59Z",
+    "minOrderValue": 50.00,
+    "active": true
+  }'
+```
+
+#### 3. Update Discount Code (Admin Only)
+```bash
+curl -X PUT http://localhost:8080/api/v1/discounts/<discount_id> \
+  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "SAVE10",
+    "type": "PERCENTAGE",
+    "value": 15.00,
+    "validFrom": "2026-07-01T00:00:00Z",
+    "validTo": "2026-07-31T23:59:59Z",
+    "minOrderValue": 50.00,
+    "active": true
+  }'
+```
+
+#### 4. Soft Delete/Deactivate Discount Code (Admin Only)
+```bash
+curl -X DELETE http://localhost:8080/api/v1/discounts/<discount_id> \
+  -H "Authorization: Bearer <admin_jwt_token>"
+```
+
 ## Assumptions Log
 
 ### Phase 1 Assumptions
@@ -464,6 +533,12 @@ curl -X PATCH http://localhost:8080/api/v1/orders/<order_id>/status \
 - **404 vs 403 on Cross-Customer Detail Views**: To prevent information leakage (e.g., confirming the existence of a valid order ID to non-owners), we return `404 Not Found` (instead of `403 Forbidden`) if a customer attempts to query or cancel an order that belongs to another customer.
 - **ADMIN Override Power**: Administrators are given broader capabilities to cancel orders at any stage prior to delivery (`PLACED`, `CONFIRMED`, `PACKED`, `SHIPPED`). Doing so releases reserved warehouse stock. Warehouse staff cannot perform cancellations.
 - **Selective customerId Serialization**: The `customerId` field in `OrderSummaryResponse` is serialized only for staff and administrator queries. In order summary lists returned to customers, the `customerId` is set to `null` and excluded in output serialization via Jackson `@JsonInclude(NON_NULL)`.
+
+### Phase 9 Assumptions
+- **One Discount Code per Order**: Customers can supply at most one discount code as part of a checkout request. Cart records display subtotals only.
+- **Tax on Post-Discount Amount**: Flat tax is calculated on the net order subtotal after applying the discount, consistent with standard retail invoicing rules.
+- **Configurable Flat Rate**: A single global tax rate is supported via properties configuration (`app.tax-rate`). Advanced regional tax jurisdiction mapping is out of scope.
+- **Anti-Abuse Capping**: Discount usage is tracked against customers and non-cancelled orders, capping usage at a maximum of one use per customer. Cancelled orders restore eligibility.
 
 
 
