@@ -40,7 +40,7 @@ To run tests using the in-memory H2 database under the `test` profile:
 ## Phased Roadmap
 - **Phase 1**: Project Scaffold, Configuration, and Base Domain Model (Completed)
 - **Phase 2**: Authentication & Role-Based Access Control (RBAC) (Completed)
-- **Phase 3**: Catalog & Product Information Management (Pending)
+- **Phase 3**: Catalog & Product Information Management (Completed)
 - **Phase 4**: Inventory & Warehouse Management (Pending)
 - **Phase 5**: Cart Operations & Price Calculation (Pending)
 - **Phase 6**: Order Placement & Checkout Transaction (Pending)
@@ -129,6 +129,58 @@ curl -X POST http://localhost:8080/api/v1/auth/admin/register \
   }'
 ```
 
+## Catalog & Product Management (Phase 3)
+
+### Features & Security Access
+- **Anonymous Storefront Visibility**: Unauthenticated users (and `CUSTOMER`s) have public read access to `GET /api/v1/products` (including search/filters) and `GET /api/v1/categories`.
+- **Admin-Only Mutations**: Creating, updating, deleting, or deactivating categories/products is strictly restricted to users with the `ADMIN` role.
+- **Category Nesting**: Categories support self-referencing hierarchy checks to block circular parenting chains (results in `400 Bad Request`).
+- **Product Soft Delete**: Deleting a product sets `active = false`. Customers/anonymous visitors cannot see inactive products, but `ADMIN` and `WAREHOUSE_STAFF` can retrieve and search them.
+- **Category Delete Guards**: Category deletion is blocked (`409 Conflict`) if subcategories or products are linked.
+
+### API Usage Examples (cURL)
+
+#### 1. Create a Category (Admin Only)
+```bash
+curl -X POST http://localhost:8080/api/v1/categories \
+  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Electronics"
+  }'
+```
+
+#### 2. Create a Nested Category (Admin Only)
+```bash
+curl -X POST http://localhost:8080/api/v1/categories \
+  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Laptops",
+    "parentCategoryId": "<electronics_category_id>"
+  }'
+```
+
+#### 3. Create a Product (Admin Only)
+```bash
+curl -X POST http://localhost:8080/api/v1/products \
+  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "MacBook Pro",
+    "description": "Powerful laptop",
+    "categoryId": "<laptops_category_id>",
+    "price": 1999.99,
+    "active": true
+  }'
+```
+
+#### 4. Search Products (Public)
+Supports searching by keyword, price range, category filter (recursively compiling descendant categories if `includeDescendants=true`), sorting, and pagination:
+```bash
+curl -X GET "http://localhost:8080/api/v1/products?categoryId=<electronics_category_id>&includeDescendants=true&keyword=macbook&minPrice=1000.00&maxPrice=3000.00&page=0&size=10&sortBy=price&direction=asc"
+```
+
 ## Assumptions Log
 
 ### Phase 1 Assumptions
@@ -143,3 +195,9 @@ curl -X POST http://localhost:8080/api/v1/auth/admin/register \
 - **No Email Verification / Password Reset**: Users are activated immediately upon registration. Verification emails and self-service password recovery are out of scope.
 - **Role Escalation Prevention**: The public `/auth/register` endpoint only creates `CUSTOMER` accounts. Creating `ADMIN` and `WAREHOUSE_STAFF` users requires calling `/auth/admin/register`, which is restricted to authenticated users with `ROLE_ADMIN`.
 - **JWT Key Deployment**: The default development key is hardcoded for convenience during local development and automated testing, but must be overridden via the `JWT_SECRET` environment variable in production settings.
+
+### Phase 3 Assumptions
+- **Nesting Descendants Search Resolution**: When filtering products by category ID, subcategories are recursively evaluated at the service layer rather than utilizing vendor-specific recursively nested SQL queries (CTE) for maximum portability between MySQL and H2.
+- **Visibility Rules for Soft-deleted Products**: Direct product lookups by ID of inactive products return `404 Not Found` for customers, but `200 OK` (returning details showing `active=false`) for admins/warehouse staff to allow viewing and editing historical logs.
+- **Category Name Uniqueness Constraint**: Category names are enforced to be unique globally (case-insensitive check) to prevent confusion at different tree levels.
+
