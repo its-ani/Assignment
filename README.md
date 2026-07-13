@@ -252,6 +252,71 @@ Response:
 }
 ```
 
+## Customer Cart Management (Phase 5)
+
+### Features & Security Access
+- **Transparent Cart Identification**: Cart endpoints do not expose or accept a `cartId` path parameter. The active cart is resolved implicitly from the authenticated user's ID inside the JWT token.
+- **Implicit Cart Creation**: An active cart is created automatically on the user's first view or addition of a product. No explicit "create cart" call is needed.
+- **Role restrictions**: Cart endpoints are strictly CUSTOMER-only. Admin and Warehouse staff will receive `403 Forbidden`.
+- **Deduplication of Items**: Adding the same product multiple times increments the quantity on the existing CartItem rather than creating a duplicate row.
+- **Advisory Inventory Checking**: Adding/updating cart items performs a soft availability check. If quantity exceeds aggregate warehouse availability, an `availabilityWarning` is attached to the item response, but the action succeeds (as stock changes dynamically). Hard reservations are deferred to Phase 6 checkout.
+- **Live Price Computation**: Cart subtotal and item unit prices are computed on the fly on GET based on current product prices (not cached in DB) to reflect real-time pricing changes.
+- **Zero-Quantity Removal**: Updating an item's quantity to `0` removes it from the cart.
+- **Persistent Empty Carts**: Removing the last item or clearing the cart empties the items list but keeps the active `Cart` record.
+
+### API Usage Examples (cURL)
+
+#### 1. View My Cart (Customer Only)
+```bash
+curl -X GET http://localhost:8080/api/v1/cart \
+  -H "Authorization: Bearer <customer_jwt_token>"
+```
+Response:
+```json
+{
+  "id": "cfcb25bc-d6c6-463f-8aac-fde55ccdf60d",
+  "status": "ACTIVE",
+  "items": [],
+  "subtotal": 0.00,
+  "itemCount": 0
+}
+```
+
+#### 2. Add Item to Cart (Customer Only)
+```bash
+curl -X POST http://localhost:8080/api/v1/cart/items \
+  -H "Authorization: Bearer <customer_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "<product_uuid>",
+    "quantity": 2
+  }'
+```
+
+#### 3. Update Item Quantity (Customer Only)
+Allows setting quantity to 0 to remove the line item.
+```bash
+curl -X PATCH http://localhost:8080/api/v1/cart/items/<product_uuid> \
+  -H "Authorization: Bearer <customer_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "quantity": 5
+  }'
+```
+
+#### 4. Remove Item from Cart (Customer Only)
+```bash
+curl -X DELETE http://localhost:8080/api/v1/cart/items/<product_uuid> \
+  -H "Authorization: Bearer <customer_jwt_token>"
+```
+
+#### 5. Clear Cart (Customer Only)
+Empties all items but preserves the active cart record.
+```bash
+curl -X DELETE http://localhost:8080/api/v1/cart \
+  -H "Authorization: Bearer <customer_jwt_token>"
+```
+
 ## Assumptions Log
 
 ### Phase 1 Assumptions
@@ -277,4 +342,13 @@ Response:
 - **Direct Inventory Auditing Synchronicity**: Direct manual stock sets/adjustments write synchronous audit logs inside the same database transaction. This guarantees instant consistency of direct admin edits. The asynchronous event-driven audit pipeline will be built in Phase 7 to record checkout and fulfillment event lifecycles.
 - **quantityReserved Initialization**: The `quantityReserved` field is initialized to `0` and is not modifiable by direct admin APIs in this phase. It will be managed exclusively via checkout lock mechanisms added in Phase 6.
 - **Simple Warehouses**: Location uses a descriptive text/address string rather than geo-coordinates. Spatial query functions are out of scope.
+
+### Phase 5 Assumptions
+- **No cartId in Endpoints**: Carts are fetched and mutated transparently based on the customer's JWT authentication token rather than exposure via a path parameter (e.g., `/api/v1/cart/items` instead of `/api/v1/cart/{cartId}/items`). This prevents cross-tenant access and ID harvesting attacks.
+- **Implicit Cart Creation**: When a customer performs their first cart-related action (retrieving the cart or adding an item), an active cart is implicitly created. Customers do not need to call a separate endpoint to create their cart.
+- **Live Price and Subtotal Computations**: Subtotals and product unit prices are evaluated dynamically on read from current catalog prices. They are not stored/cached in the cart database record. This ensures the cart always reflects current store pricing.
+- **Advisory Stock Checking**: Stock level validation performed at cart add/update is soft/advisory. If stock is unavailable, an `availabilityWarning` is returned, but the item is still allowed in the cart. Hard inventory checks and lock reservations are deferred to Phase 6 checkout.
+- **Zero Quantity Item Removal**: Mutating a cart item quantity to `0` is equivalent to deletion. The line item is completely removed from the cart database record.
+- **Persistent Empty Carts**: Clearing a cart or removing the last item empties the items list but preserves the active cart record, allowing for simpler state tracking for future checkouts.
+
 
