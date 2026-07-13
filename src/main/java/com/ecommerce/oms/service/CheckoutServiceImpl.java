@@ -4,9 +4,11 @@ import com.ecommerce.oms.domain.*;
 import com.ecommerce.oms.dto.*;
 import com.ecommerce.oms.exception.*;
 import com.ecommerce.oms.repository.*;
+import com.ecommerce.oms.event.OrderPlacedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +33,7 @@ public class CheckoutServiceImpl implements CheckoutService {
     private final UserRepository userRepository;
     private final InventoryReservationService inventoryReservationService;
     private final PaymentService paymentService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${app.tax-rate:0.10}")
     private double taxRate;
@@ -148,7 +151,14 @@ public class CheckoutServiceImpl implements CheckoutService {
                 orderItems.add(orderItem);
             }
 
-            // TODO: Phase 7 will hook in here via OrderPlacedEvent
+            // Publish OrderPlacedEvent to trigger downstream processing (audit logs, notifications)
+            eventPublisher.publishEvent(OrderPlacedEvent.builder()
+                    .orderId(order.getId())
+                    .customerId(customerId)
+                    .totalAmount(order.getTotalAmount())
+                    .timestamp(Instant.now())
+                    .build());
+
             log.info("Checkout successful for customer: {}. Created order: {}", customerId, order.getId());
 
             return mapToResponse(order, orderItems, payment);
