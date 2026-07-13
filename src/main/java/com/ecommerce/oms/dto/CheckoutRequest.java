@@ -8,4 +8,5 @@ import lombok.*;
 @AllArgsConstructor
 public class CheckoutRequest {
     private String idempotencyKey;
+    private String discountCode;
 }
