@@ -37,6 +37,9 @@ public class Order {
     @Column(name = "tax_amount", nullable = false, precision = 38, scale = 2)
     private BigDecimal taxAmount = BigDecimal.ZERO;
 
+    @Column(name = "discount_code")
+    private String discountCode;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
