@@ -17,8 +17,8 @@ public class OpenApiConfig {
         return new OpenAPI()
                 .info(new Info()
                         .title("E-Commerce Order Management System API")
-                        .version("v1.0")
-                        .description("API Documentation for Phase 2: Authentication, Authorization (RBAC), and JWT"))
+                        .version("v1.0.0")
+                        .description("Comprehensive REST API for the E-Commerce Order Management System. Key capabilities include: Auth/RBAC, Product Catalog, Warehouse & Inventory (with optimistic locking & retries), Shopping Cart, Checkout, Order Lifecycle management, Discounts/Tax application, and Returns/Refunds processing."))
                 .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
                 .components(new Components()
                         .addSecuritySchemes(securitySchemeName,

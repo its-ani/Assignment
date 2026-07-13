@@ -22,6 +22,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
+import java.util.concurrent.TimeUnit;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -271,20 +273,11 @@ class ReturnLifecycleIntegrationTest {
         assertEquals(11, postInv.getQuantityOnHand()); // 10 -> 11
 
         // 7. Verify async audit log is created
-        long startTime = System.currentTimeMillis();
-        boolean auditLogSaved = false;
-        while (System.currentTimeMillis() - startTime < 3000) {
+        await().atMost(3, TimeUnit.SECONDS).until(() -> {
             List<AuditLog> logs = auditLogRepository.findAll();
-            long count = logs.stream()
-                    .filter(log -> log.getEntityId().equals(returnId) && log.getAction().equals("RETURN_STATUS_CHANGED"))
-                    .count();
-            if (count > 0) {
-                auditLogSaved = true;
-                break;
-            }
-            Thread.sleep(100);
-        }
-        assertTrue(auditLogSaved, "Expected async ReturnStatusChangedEvent to save an AuditLog entry.");
+            return logs.stream()
+                    .anyMatch(log -> log.getEntityId().equals(returnId) && log.getAction().equals("RETURN_STATUS_CHANGED"));
+        });
     }
 
     @Test

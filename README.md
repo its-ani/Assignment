@@ -1,555 +1,599 @@
 # E-Commerce Order Management System (OMS)
 
 ## Overview
-This is a Spring Boot based E-Commerce Order Management System (OMS) designed to handle core transactional flows such as inventory management, cart operations, order checkout processing, payment integration, and post-purchase activities like returns. It is constructed as a multi-phase project, starting with foundational scaffolding and domain entities.
+
+A production-grade, Spring Boot–based **E-Commerce Order Management System** implementing the full transactional lifecycle: authentication & RBAC, product catalog, multi-warehouse inventory, shopping cart, concurrent checkout with optimistic-locking retries, payment simulation, async event pipeline, full order lifecycle management, discount/tax engine, and returns & refunds processing.
+
+All 11 development phases are **complete**. The project ships with **127 integration tests** covering every controller, concurrency scenarios, and the async event pipeline.
+
+---
 
 ## Tech Stack
-- **Java**: Version 17+ (e.g. Java 23)
-- **Framework**: Spring Boot 3.3.x (Web, JPA)
-- **Database**: MySQL (Development/Production), H2 (In-memory, Testing)
-- **Schema Management**: Flyway Migrations
-- **Utilities**: Lombok, Springdoc-OpenAPI (Swagger UI)
-- **Build Tool**: Maven
+
+| Layer | Technology |
+|---|---|
+| Language | Java 17 |
+| Framework | Spring Boot 3.3.1 (Web, Data JPA, Security, Validation) |
+| Database (prod) | MySQL 8.0+ |
+| Database (test) | H2 (in-memory) |
+| Schema Management | Flyway Migrations |
+| Auth | Spring Security + JJWT 0.12.6 (stateless JWT) |
+| Retry / Concurrency | Spring Retry (`spring-retry`) |
+| API Docs | Springdoc OpenAPI 2.5.0 (Swagger UI) |
+| Utilities | Lombok |
+| Build | Maven (Maven Wrapper included) |
+| Testing | JUnit 5, Spring Boot Test, MockMvc, Awaitility |
+
+---
 
 ## Getting Started
 
-### Local MySQL Setup
-To run MySQL locally, you can use Docker:
+### 1. Start MySQL (Docker)
 ```bash
-docker run --name oms-mysql -e MYSQL_DATABASE=oms_db -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 -d mysql:8.0
+docker run --name oms-mysql \
+  -e MYSQL_DATABASE=oms_db \
+  -e MYSQL_ROOT_PASSWORD=password \
+  -p 3306:3306 -d mysql:8.0
 ```
 
-### Environment Variables
-The application uses the following environment variables (with default values for development):
-- `DB_URL`: JDBC database URL (default: `jdbc:mysql://localhost:3306/oms_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true`)
-- `DB_USERNAME`: Database username (default: `root`)
-- `DB_PASSWORD`: Database password (default: `password`)
+### 2. Environment Variables
+The application reads from these environment variables (all have safe development defaults):
 
-### Running the Application
-To run the application with the development profile (default):
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_URL` | `jdbc:mysql://localhost:3306/oms_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true` | JDBC connection URL |
+| `DB_USERNAME` | `root` | DB username |
+| `DB_PASSWORD` | `password` | DB password |
+| `JWT_SECRET` | `404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970` | JWT signing key (≥256-bit, **override in production**) |
+| `JWT_EXPIRATION_MS` | `86400000` | Token TTL in milliseconds (24 hours) |
+
+### 3. Run the Application
 ```bash
 ./mvnw spring-boot:run
 ```
+The application starts on **port 8080**. Flyway automatically runs all migrations on startup.
 
-### Running Tests
-To run tests using the in-memory H2 database under the `test` profile:
+### 4. Run Tests
 ```bash
-./mvnw test
+./mvnw clean test
+```
+All 127 tests run against an in-memory H2 database under the `test` Spring profile. No external services are required.
+
+### 5. Swagger UI
+Once running, browse the interactive API docs at:
+```
+http://localhost:8080/swagger-ui.html
 ```
 
-## Phased Roadmap
-- **Phase 1**: Project Scaffold, Configuration, and Base Domain Model (Completed)
-- **Phase 2**: Authentication & Role-Based Access Control (RBAC) (Completed)
-- **Phase 3**: Catalog & Product Information Management (Completed)
-- **Phase 4**: Inventory & Warehouse Management (Pending)
-- **Phase 5**: Cart Operations & Price Calculation (Pending)
-- **Phase 6**: Order Placement & Checkout Transaction (Completed)
-- **Phase 7**: State Machine for Order Lifecycle (Completed)
-- **Phase 8**: Order Lifecycle & Fulfillment Status Management (Completed)
-- **Phase 9**: Returns Processing & Refunds (Pending)
-- **Phase 10**: OpenAPI Documentation & End-to-End Tests (Pending)
-- **Phase 11**: Production Deployment & Optimization (Pending)
+---
 
+## Bootstrap: First Admin Account
 
-## Authentication & RBAC (Phase 2)
+On first startup, a `DatabaseInitializer` component seeds a default admin if no users exist:
 
-We use **Spring Security** combined with stateless **JSON Web Tokens (JWT)** generated via the **JJWT** (Java JWT) library. 
+| Field | Value |
+|---|---|
+| Email | `admin@ecommerce.com` |
+| Password | `AdminPass123!` |
+| Role | `ADMIN` |
 
-### Roles & Access Control
-- `CUSTOMER`: Default role for all users. Can perform checkout, manage their own cart, view catalog, etc.
-- `WAREHOUSE_STAFF`: Responsible for managing inventory levels, packing orders, and marking orders as packed/shipped.
-- `ADMIN`: Full system access, including creating and managing warehouse staff and other administrators.
+---
 
-### JWT Properties & Configuration
-The JWT properties can be overridden via environment variables in `application.yml`:
-- `app.security.jwt.secret` (env variable: `JWT_SECRET`): The signature key used to sign tokens (must be at least 256 bits. Default: `404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970`).
-- `app.security.jwt.expiration-ms` (env variable: `JWT_EXPIRATION_MS`): Token validity duration. Default: `86400000` (24 hours).
+## System Architecture
 
-### Bootstrapping the System (First Admin Account)
-On startup, a `DatabaseInitializer` component runs and automatically inserts a default Administrator account if no users exist in the database:
-- **Email**: `admin@ecommerce.com`
-- **Password**: `AdminPass123!`
-- **Role**: `ADMIN`
+```
+┌─────────────────────────────────────────────────────────┐
+│                    REST Controllers                      │
+│  Auth │ Category │ Product │ Warehouse │ Inventory      │
+│  Cart │ Checkout │ Order   │ Discount  │ Return         │
+└───────────────────────┬─────────────────────────────────┘
+                        │ @PreAuthorize (RBAC)
+┌───────────────────────▼─────────────────────────────────┐
+│                    Service Layer                         │
+│  AuthService │ CartService │ CheckoutService            │
+│  OrderService │ InventoryService │ ReturnService        │
+│  DiscountValidationService │ TaxCalculationService      │
+│  RefundCalculationService │ PaymentService              │
+└───────────────────────┬─────────────────────────────────┘
+                        │ JPA Repositories
+┌───────────────────────▼─────────────────────────────────┐
+│                 Database (MySQL / H2)                    │
+│  users │ categories │ products │ warehouses             │
+│  inventory_items │ carts │ cart_items │ orders          │
+│  order_items │ payments │ discounts │ return_requests   │
+│  audit_logs                                             │
+└─────────────────────────────────────────────────────────┘
+                        │ ApplicationEvent
+┌───────────────────────▼─────────────────────────────────┐
+│            Async Event Pipeline (AFTER_COMMIT)          │
+│  OrderPlacedEvent → audit log + notification simulation │
+│  OrderStatusChangedEvent → audit log + notifications    │
+└─────────────────────────────────────────────────────────┘
+```
 
-### API Usage Examples (cURL)
+---
 
-#### 1. Register a new Customer Account
-Public endpoint. The `role` field is optional and is ignored here (forced to `CUSTOMER` to prevent privilege escalation):
+## Feature Reference
+
+### Phase 1 — Project Scaffold & Domain Model
+- Maven project with Spring Boot 3.3.1, Flyway, and H2/MySQL dual-profile setup
+- UUID primary keys (stored as `VARCHAR(36)`) for DB portability
+- Core domain entities: `User`, `Category`, `Product`, `Warehouse`, `InventoryItem`, `Cart`, `CartItem`, `Order`, `OrderItem`, `Payment`, `Discount`, `ReturnRequest`, `AuditLog`
+- Optimistic locking via `@Version` on `InventoryItem`
+
+---
+
+### Phase 2 — Authentication & RBAC
+
+**Roles:**
+
+| Role | Description |
+|---|---|
+| `CUSTOMER` | End-user shopping: cart, checkout, orders, returns |
+| `WAREHOUSE_STAFF` | Inventory management, order fulfillment advancement |
+| `ADMIN` | Full system access including user provisioning |
+
+**Key behaviour:**
+- Stateless JWT (JJWT) — no session, no refresh tokens
+- Public `/auth/register` always creates `CUSTOMER` accounts (privilege-escalation blocked)
+- `/auth/admin/register` (ADMIN-only) creates `ADMIN` or `WAREHOUSE_STAFF` accounts
+- 24-hour token expiry (configurable via `JWT_EXPIRATION_MS`)
+
+**Endpoints:**
+
 ```bash
+# Register a customer (public)
 curl -X POST http://localhost:8080/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "John Doe",
-    "email": "john.doe@example.com",
-    "password": "securepassword123"
-  }'
-```
+  -d '{"name":"Alice","email":"alice@example.com","password":"Secret123!"}'
 
-#### 2. Log in to obtain a JWT
-```bash
+# Login — returns JWT
 curl -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{
-    "email": "john.doe@example.com",
-    "password": "securepassword123"
-  }'
+  -d '{"email":"alice@example.com","password":"Secret123!"}'
+
+# Get current user profile
+curl http://localhost:8080/api/v1/auth/me \
+  -H "Authorization: Bearer <token>"
+
+# Register admin/staff (ADMIN only)
+curl -X POST http://localhost:8080/api/v1/auth/admin/register \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Bob Staff","email":"bob@example.com","password":"Staff123!","role":"WAREHOUSE_STAFF"}'
 ```
-Response:
+
+Login response:
 ```json
 {
   "token": "eyJhbGciOiJIUzI1NiJ9...",
   "tokenType": "Bearer",
   "expiresIn": 86400000,
-  "user": {
-    "id": "e9b25102-...",
-    "name": "John Doe",
-    "email": "john.doe@example.com",
-    "role": "CUSTOMER"
-  }
+  "user": { "id": "...", "name": "Alice", "email": "alice@example.com", "role": "CUSTOMER" }
 }
 ```
 
-#### 3. Access a Protected Endpoint
-To call `/api/v1/auth/me` (returns the currently authenticated user's details):
+---
+
+### Phase 3 — Catalog & Product Management
+
+- Hierarchical categories (self-referencing, circular-parent guard → `400 Bad Request`)
+- Category deletion blocked if subcategories or products are linked (`409 Conflict`)
+- Category names globally unique (case-insensitive)
+- Product soft-delete: sets `active = false`; hidden from customers, visible to ADMIN/WAREHOUSE_STAFF
+- Product search: keyword, price range, category (with optional recursive descendant inclusion), sort, pagination
+
+**Access:** Public (read), ADMIN (write)
+
 ```bash
-curl -X GET http://localhost:8080/api/v1/auth/me \
-  -H "Authorization: Bearer <your_jwt_token>"
-```
-
-#### 4. Create an Admin or Warehouse User (Admin Only)
-Requires an `ADMIN` role bearer token (e.g. login as `admin@ecommerce.com` to get the token):
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/admin/register \
-  -H "Authorization: Bearer <admin_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Warehouse Supervisor",
-    "email": "supervisor@ecommerce.com",
-    "password": "workerpassword123",
-    "role": "WAREHOUSE_STAFF"
-  }'
-```
-
-## Catalog & Product Management (Phase 3)
-
-### Features & Security Access
-- **Anonymous Storefront Visibility**: Unauthenticated users (and `CUSTOMER`s) have public read access to `GET /api/v1/products` (including search/filters) and `GET /api/v1/categories`.
-- **Admin-Only Mutations**: Creating, updating, deleting, or deactivating categories/products is strictly restricted to users with the `ADMIN` role.
-- **Category Nesting**: Categories support self-referencing hierarchy checks to block circular parenting chains (results in `400 Bad Request`).
-- **Product Soft Delete**: Deleting a product sets `active = false`. Customers/anonymous visitors cannot see inactive products, but `ADMIN` and `WAREHOUSE_STAFF` can retrieve and search them.
-- **Category Delete Guards**: Category deletion is blocked (`409 Conflict`) if subcategories or products are linked.
-
-### API Usage Examples (cURL)
-
-#### 1. Create a Category (Admin Only)
-```bash
+# Create category (ADMIN)
 curl -X POST http://localhost:8080/api/v1/categories \
-  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "Electronics"
-  }'
-```
+  -d '{"name":"Electronics","description":"All electronics"}'
 
-#### 2. Create a Nested Category (Admin Only)
-```bash
+# Create sub-category (ADMIN)
 curl -X POST http://localhost:8080/api/v1/categories \
-  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "Laptops",
-    "parentCategoryId": "<electronics_category_id>"
-  }'
-```
+  -d '{"name":"Laptops","parentId":"<electronics_id>"}'
 
-#### 3. Create a Product (Admin Only)
-```bash
+# Create product (ADMIN)
 curl -X POST http://localhost:8080/api/v1/products \
-  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "MacBook Pro",
-    "description": "Powerful laptop",
-    "categoryId": "<laptops_category_id>",
-    "price": 1999.99,
-    "active": true
-  }'
+  -d '{"name":"MacBook Pro","description":"Powerful laptop","categoryId":"<laptops_id>","price":1999.99,"sku":"MBP-M3","active":true}'
+
+# Search products (public)
+curl "http://localhost:8080/api/v1/products?categoryId=<id>&includeDescendants=true&keyword=macbook&minPrice=1000&maxPrice=3000&page=0&size=10&sortBy=price&direction=asc"
 ```
 
-#### 4. Search Products (Public)
-Supports searching by keyword, price range, category filter (recursively compiling descendant categories if `includeDescendants=true`), sorting, and pagination:
+---
+
+### Phase 4 — Warehouse & Inventory Management
+
+- Warehouse CRUD (ADMIN write, ADMIN/WAREHOUSE_STAFF read)
+- Warehouse deletion blocked if inventory records are linked (`409 Conflict`)
+- Stock visibility by role:
+  - **Customers / public**: aggregate `available: true/false` + `totalAvailableQuantity` embedded in product responses
+  - **ADMIN / WAREHOUSE_STAFF**: full per-warehouse breakdown (`quantityOnHand`, `quantityReserved`, `quantityAvailable`)
+- `quantityAvailable = quantityOnHand - quantityReserved` (derived, never negative)
+- Synchronous audit log written in the same transaction for every stock mutation
+
 ```bash
-curl -X GET "http://localhost:8080/api/v1/products?categoryId=<electronics_category_id>&includeDescendants=true&keyword=macbook&minPrice=1000.00&maxPrice=3000.00&page=0&size=10&sortBy=price&direction=asc"
-```
-
-## Warehouse & Inventory Management (Phase 4)
-
-### Features & Security Access
-- **Warehouse CRUD**: Restricted to `ADMIN` for creation, update, and deletion. `WAREHOUSE_STAFF` can read warehouses, while `CUSTOMER` and anonymous callers are forbidden (`403 Forbidden`).
-- **Warehouse Delete Guard**: Deletion of a warehouse is blocked (`409 Conflict`) if any inventory item mapping is associated with it.
-- **Stock Visibility (Public vs. Private)**: 
-  - `CUSTOMER` and anonymous users can view an aggregate availability signal `availability` nested under product response endpoints (e.g. `available: true/false`, and `totalAvailableQuantity`). They cannot see detailed per-warehouse stock breakdowns.
-  - `ADMIN` and `WAREHOUSE_STAFF` can retrieve full detailed breakdowns of inventory (physical `quantityOnHand`, pending `quantityReserved`, and derived `quantityAvailable` calculated as `quantityOnHand - quantityReserved`).
-- **Inventory Mutations (Admin Only)**:
-  - **Absolute Stock Set**: `PUT /api/v1/inventory/{productId}/warehouse/{warehouseId}` sets the exact physical stock quantity.
-  - **Relative Stock Adjustment**: `PATCH /api/v1/inventory/{productId}/warehouse/{warehouseId}/adjust` increments or decrements physical stock by a delta.
-- **Safety Guards**:
-  - Stock updates must never result in a negative `quantityOnHand`.
-  - Reserved stock (`quantityReserved`) must never exceed physical stock (`quantityOnHand`).
-  - Violation of these guards results in a `409 Conflict` (for relative adjust and absolute sets that violate the constraints).
-- **Synchronous Audit Logging**: Every inventory edit (creation, set, or adjust) synchronously writes a log to the `audit_logs` table in the same transaction, recording the before/after values and the authenticated email.
-
-### API Usage Examples (cURL)
-
-#### 1. Create a Warehouse (Admin Only)
-```bash
-curl -X POST http://localhost:8080/api/v1/warehouses \
-  -H "Authorization: Bearer <admin_jwt_token>" \
+# Set stock absolute (ADMIN)
+curl -X PUT http://localhost:8080/api/v1/inventory/<product_id>/warehouse/<warehouse_id> \
+  -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "Central Distribution Center",
-    "location": "123 Industrial Parkway, Chicago, IL"
-  }'
-```
+  -d '{"quantityOnHand":100}'
 
-#### 2. Set Warehouse Stock (Admin Only)
-```bash
-curl -X PUT http://localhost:8080/api/v1/inventory/<product_uuid>/warehouse/<warehouse_uuid> \
-  -H "Authorization: Bearer <admin_jwt_token>" \
+# Adjust stock delta (ADMIN)
+curl -X PATCH http://localhost:8080/api/v1/inventory/<product_id>/warehouse/<warehouse_id>/adjust \
+  -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "quantityOnHand": 100
-  }'
+  -d '{"delta":-10,"reason":"Damaged goods removal"}'
+
+# View inventory for a product (ADMIN/WAREHOUSE_STAFF)
+curl http://localhost:8080/api/v1/inventory/product/<product_id> \
+  -H "Authorization: Bearer <staff_token>"
+
+# View inventory in a warehouse (ADMIN/WAREHOUSE_STAFF)
+curl http://localhost:8080/api/v1/inventory/warehouse/<warehouse_id> \
+  -H "Authorization: Bearer <staff_token>"
 ```
 
-#### 3. Adjust Stock by Delta (Admin Only)
-```bash
-curl -X PATCH http://localhost:8080/api/v1/inventory/<product_uuid>/warehouse/<warehouse_uuid>/adjust \
-  -H "Authorization: Bearer <admin_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "delta": -10,
-    "reason": "Damaged stock return"
-  }'
-```
-
-#### 4. View Product with Public Availability Summary (Public)
-```bash
-curl -X GET http://localhost:8080/api/v1/products/<product_uuid>
-```
-Response:
+Product response (public) includes:
 ```json
 {
-  "id": "abc-...",
+  "id": "...",
   "name": "Smartphone",
-  "description": "Premium mobile",
   "price": 599.99,
   "active": true,
-  "availability": {
-    "productId": "abc-...",
-    "available": true,
-    "totalAvailableQuantity": 90
-  }
+  "availability": { "available": true, "totalAvailableQuantity": 90 }
 }
 ```
 
-## Customer Cart Management (Phase 5)
+---
 
-### Features & Security Access
-- **Transparent Cart Identification**: Cart endpoints do not expose or accept a `cartId` path parameter. The active cart is resolved implicitly from the authenticated user's ID inside the JWT token.
-- **Implicit Cart Creation**: An active cart is created automatically on the user's first view or addition of a product. No explicit "create cart" call is needed.
-- **Role restrictions**: Cart endpoints are strictly CUSTOMER-only. Admin and Warehouse staff will receive `403 Forbidden`.
-- **Deduplication of Items**: Adding the same product multiple times increments the quantity on the existing CartItem rather than creating a duplicate row.
-- **Advisory Inventory Checking**: Adding/updating cart items performs a soft availability check. If quantity exceeds aggregate warehouse availability, an `availabilityWarning` is attached to the item response, but the action succeeds (as stock changes dynamically). Hard reservations are deferred to Phase 6 checkout.
-- **Live Price Computation**: Cart subtotal and item unit prices are computed on the fly on GET based on current product prices (not cached in DB) to reflect real-time pricing changes.
-- **Zero-Quantity Removal**: Updating an item's quantity to `0` removes it from the cart.
-- **Persistent Empty Carts**: Removing the last item or clearing the cart empties the items list but keeps the active `Cart` record.
+### Phase 5 — Shopping Cart
 
-### API Usage Examples (cURL)
+- Cart is resolved implicitly from JWT (no `cartId` in URLs — prevents cross-user access)
+- Lazy cart creation: first `GET /cart` or `POST /cart/items` auto-creates the cart
+- Deduplication: adding the same product increments quantity on the existing line item
+- Advisory stock check: returns `availabilityWarning` if requested quantity exceeds stock, but still succeeds (hard lock deferred to checkout)
+- Unit prices and subtotals computed live from current catalog prices (not stored)
+- Setting quantity to `0` removes the line item
+- Clearing the cart preserves the cart record (empty items)
 
-#### 1. View My Cart (Customer Only)
+**Access:** CUSTOMER only
+
 ```bash
-curl -X GET http://localhost:8080/api/v1/cart \
-  -H "Authorization: Bearer <customer_jwt_token>"
-```
-Response:
-```json
-{
-  "id": "cfcb25bc-d6c6-463f-8aac-fde55ccdf60d",
-  "status": "ACTIVE",
-  "items": [],
-  "subtotal": 0.00,
-  "itemCount": 0
-}
-```
+# View cart
+curl http://localhost:8080/api/v1/cart -H "Authorization: Bearer <customer_token>"
 
-#### 2. Add Item to Cart (Customer Only)
-```bash
+# Add item
 curl -X POST http://localhost:8080/api/v1/cart/items \
-  -H "Authorization: Bearer <customer_jwt_token>" \
+  -H "Authorization: Bearer <customer_token>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "productId": "<product_uuid>",
-    "quantity": 2
-  }'
-```
+  -d '{"productId":"<id>","quantity":2}'
 
-#### 3. Update Item Quantity (Customer Only)
-Allows setting quantity to 0 to remove the line item.
-```bash
-curl -X PATCH http://localhost:8080/api/v1/cart/items/<product_uuid> \
-  -H "Authorization: Bearer <customer_jwt_token>" \
+# Update quantity (set to 0 to remove)
+curl -X PATCH http://localhost:8080/api/v1/cart/items/<product_id> \
+  -H "Authorization: Bearer <customer_token>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "quantity": 5
-  }'
+  -d '{"quantity":5}'
+
+# Remove single item
+curl -X DELETE http://localhost:8080/api/v1/cart/items/<product_id> \
+  -H "Authorization: Bearer <customer_token>"
+
+# Clear all items
+curl -X DELETE http://localhost:8080/api/v1/cart -H "Authorization: Bearer <customer_token>"
 ```
 
-#### 4. Remove Item from Cart (Customer Only)
+---
+
+### Phase 6 — Order Placement & Checkout
+
+- **Pessimistic lock on cart**: `PESSIMISTIC_WRITE` prevents concurrent double-submissions of the same cart
+- **Greedy warehouse-split strategy**: fulfils each cart item from the highest-stock warehouse first; splits across warehouses if needed
+- **Optimistic locking + retry**: `@Version` on `InventoryItem`; up to 5 retries with exponential backoff via Spring Retry
+- **Isolated reservation transactions**: each stock reservation runs in `REQUIRES_NEW` propagation so a retry on one product doesn't roll back others
+- **Explicit compensation**: payment failure after committed reservations triggers stock release
+- **Payment simulation**: configurable stub (forces failures in tests)
+- **Tax**: configurable flat rate via `app.tax-rate` (default 10%)
+- **Discount**: optional discount code applied at checkout (see Phase 9)
+
+**Access:** CUSTOMER only
+
 ```bash
-curl -X DELETE http://localhost:8080/api/v1/cart/items/<product_uuid> \
-  -H "Authorization: Bearer <customer_jwt_token>"
-```
-
-#### 5. Clear Cart (Customer Only)
-Empties all items but preserves the active cart record.
-```bash
-curl -X DELETE http://localhost:8080/api/v1/cart \
-  -H "Authorization: Bearer <customer_jwt_token>"
-```
-
-## Order Placement & Checkout (Phase 6)
-
-### Features & Security Access
-- **Pessimistic-Lock Idempotency**: Active carts are resolved using a `PESSIMISTIC_WRITE` lock and immediately transitioned to `CHECKED_OUT` status at the start of the checkout transaction to prevent concurrent double-submissions.
-- **Warehouse-splitting Greedy Strategy**: Orders are fulfilled using a highest-stock-first strategy across warehouses, splitting a single cart item into multiple order items if necessary to fulfill the requested quantity.
-- **Optimistic Locking Retry Loop**: Concurrency on stock reservation is handled using JPA `@Version` optimistic locking with up to 5 automatic retries and exponential backoff.
-- **Independent Transaction Isolation**: Individual stock reservations run in isolated transactions (`propagation = Propagation.REQUIRES_NEW`), preventing lock retries on one product from rolling back the entire checkout.
-- **Explicit Compensation**: If checkout fails after reservations are committed (e.g. payment failure), reserved stock is explicitly released back to the inventory via compensating actions.
-- **Configurable Payment Stub**: Simulates payment collection and forces failures dynamically during testing.
-- **Tax Placeholder**: Computes a flat 10% tax rate.
-
-### API Usage Examples (cURL)
-
-#### 1. Checkout Active Cart (Customer Only)
-```bash
+# Checkout (discount code and shipping address are optional)
 curl -X POST http://localhost:8080/api/v1/orders/checkout \
-  -H "Authorization: Bearer <customer_jwt_token>" \
+  -H "Authorization: Bearer <customer_token>" \
   -H "Content-Type: application/json" \
-  -d '{}'
+  -d '{"discountCode":"SAVE10","shippingAddress":"123 Main St, Springfield"}'
 ```
+
 Response:
 ```json
 {
-  "id": "e9e8efec-3158-454a-94d1-b9f5155e4e46",
+  "id": "e9e8efec-...",
   "status": "PLACED",
-  "items": [
-    {
-      "productId": "ab867f53-cf60-446f-b598-38e418bb1f26",
-      "productName": "Laptop",
-      "warehouseId": "5322efec-3158-454a-94d1-b9f5155e4e46",
-      "quantity": 1,
-      "unitPrice": 1000.00,
-      "lineTotal": 1000.00
-    }
-  ],
+  "items": [{ "productName": "Laptop", "quantity": 1, "unitPrice": 1000.00, "lineTotal": 1000.00 }],
   "subtotal": 1000.00,
-  "taxAmount": 100.00,
-  "discountAmount": 0.00,
-  "totalAmount": 1100.00,
+  "discountAmount": 100.00,
+  "taxAmount": 90.00,
+  "totalAmount": 990.00,
   "paymentStatus": "SUCCESS",
-  "createdAt": "2026-07-13T23:31:16Z"
+  "createdAt": "2026-07-14T00:00:00Z"
 }
 ```
 
-## Order Lifecycle & Fulfillment (Phase 8)
+---
 
-### Features & Security Access
-- **State Machine Transitions**: Enforces a strict status sequence: `PLACED -> CONFIRMED -> PACKED -> SHIPPED -> DELIVERED`.
-- **Pre-packing Cancellation Window**: Customers can self-service cancel orders only while they are in `PLACED` or `CONFIRMED` status. Once `PACKED`, cancellation is blocked.
-- **Inventory Reservation Release**: Cancelling an order automatically releases the reserved product stocks across warehouses, decrementing `quantityReserved` on `InventoryItem` records.
-- **Role-based Access Control (RBAC)**:
-  - `CUSTOMER`: Can query their own orders and details (paginated and filterable). Access to other customer orders returns `404 Not Found` to prevent ID enumeration. Can self-cancel pre-packing.
-  - `WAREHOUSE_STAFF`: Can view all orders and advance the status forward (`PLACED -> CONFIRMED -> PACKED -> SHIPPED -> DELIVERED`). Cannot cancel orders.
-  - `ADMIN`: Full access. Can view/list any order, advance statuses, and force-cancel orders at any stage prior to delivery.
-- **Async Event Pipeline**: Successful status transitions publish `OrderStatusChangedEvent`. An asynchronous listener intercepts the event post-commit (`AFTER_COMMIT`) to simulate customer notifications and record structured `AuditLog` entries.
+### Phase 7 — Async Event Pipeline
 
-### Order Status State Machine Diagram
-```text
-  [ PLACED ] ---------(Customer / Admin Cancel)---------> [ CANCELLED ]
-      |                                                        ^
-(Warehouse / Admin)                                            |
-      v                                                        |
-[ CONFIRMED ] -------(Customer / Admin Cancel)-----------------+
-      |
-(Warehouse / Admin)
-      v
-  [ PACKED ] 
-      |
-(Warehouse / Admin)
-      v
- [ SHIPPED ] ---------(Admin Force Cancel Override)------------+
-      |
-(Warehouse / Admin)
-      v
-[ DELIVERED ]
+- `OrderPlacedEvent` published on successful checkout
+- `OrderStatusChangedEvent` published on every status transition
+- Both events are processed by `OrderEventListener` **after transaction commit** (`AFTER_COMMIT`) to avoid coupling business logic with side effects
+- Side effects: structured `AuditLog` entries written to DB + customer notification simulation (logged)
+
+---
+
+### Phase 8 — Order Lifecycle & Fulfillment
+
+**Order Status State Machine:**
+
+```
+[ PLACED ] ──── Customer / Admin cancel ───────────────────────────────► [ CANCELLED ]
+    │                                                                          ▲
+    │ (Warehouse Staff / Admin advance)                                        │
+    ▼                                                                          │
+[ CONFIRMED ] ── Customer / Admin cancel ─────────────────────────────────────┤
+    │                                                                          │
+    │ (Warehouse Staff / Admin advance)                                        │
+    ▼                                                                          │
+[ PROCESSING ]                                                                 │
+    │                                                                          │
+    │ (Warehouse Staff / Admin advance)                                        │
+    ▼                                                                          │
+[ SHIPPED ] ──── Admin force-cancel ──────────────────────────────────────────┘
+    │
+    │ (Warehouse Staff / Admin advance)
+    ▼
+[ DELIVERED ] ──────────────────────────────────────────────────────────► [ RETURNED ]
 ```
 
-### API Usage Examples (cURL)
+**RBAC for orders:**
 
-#### 1. List Own Orders (Customer Only)
-```bash
-curl -X GET "http://localhost:8080/api/v1/orders?status=PLACED&page=0&size=10" \
-  -H "Authorization: Bearer <customer_jwt_token>"
-```
+| Action | CUSTOMER | WAREHOUSE_STAFF | ADMIN |
+|---|---|---|---|
+| List / view own orders | ✅ | — | — |
+| List / view all orders (`/staff`) | — | ✅ | ✅ |
+| Cancel own order (PLACED/CONFIRMED) | ✅ | — | — |
+| Advance status | — | ✅ | ✅ |
+| Force-cancel at any pre-delivery stage | — | ❌ | ✅ |
 
-#### 2. Self-Service Cancel Order (Customer Only)
+- Cross-customer order access returns `404 Not Found` (not `403`) to prevent ID enumeration
+- Cancellation releases `quantityReserved` on all associated `InventoryItem` records
+- `customerId` is stripped from order list responses returned to customers
+
 ```bash
+# My orders (CUSTOMER)
+curl "http://localhost:8080/api/v1/orders?status=PLACED&page=0&size=10" \
+  -H "Authorization: Bearer <customer_token>"
+
+# Order detail (CUSTOMER)
+curl http://localhost:8080/api/v1/orders/<order_id> \
+  -H "Authorization: Bearer <customer_token>"
+
+# Cancel own order (CUSTOMER)
 curl -X POST http://localhost:8080/api/v1/orders/<order_id>/cancel \
-  -H "Authorization: Bearer <customer_jwt_token>" \
+  -H "Authorization: Bearer <customer_token>" \
   -H "Content-Type: application/json" \
-  -d '{"reason": "Wrong item selected"}'
-```
+  -d '{"reason":"Changed my mind"}'
 
-#### 3. Update Order Status (Warehouse Staff / Admin Only)
-```bash
+# All orders - staff view (ADMIN/WAREHOUSE_STAFF)
+curl "http://localhost:8080/api/v1/orders/staff?status=CONFIRMED&page=0&size=20" \
+  -H "Authorization: Bearer <staff_token>"
+
+# Advance order status (ADMIN/WAREHOUSE_STAFF)
 curl -X PATCH http://localhost:8080/api/v1/orders/<order_id>/status \
-  -H "Authorization: Bearer <staff_jwt_token>" \
+  -H "Authorization: Bearer <staff_token>" \
   -H "Content-Type: application/json" \
-  -d '{"newStatus": "PACKED"}'
+  -d '{"newStatus":"PROCESSING"}'
 ```
 
-## Discount Codes & Tax Calculation (Phase 9)
+---
 
-Integrates discount management and proper tax calculation into checkout:
-- **Order of Operations**: `Subtotal` (from cart item catalog prices) $\rightarrow$ Apply `Discount` $\rightarrow$ Compute `Tax` on the post-discount subtotal amount $\rightarrow$ Final `Total` = `Subtotal` - `Discount` + `Tax`.
-- **Tax Rate Configuration**: The tax rate is configurable globally via the `app.tax-rate` property (fallback to `0.10` / 10%).
-- **Discount Validation Rules**:
-  - Code must exist and be active.
-  - Current date/time must fall within `[validFrom, validTo]`.
-  - Cart subtotal must meet or exceed `minOrderValue`.
-  - **Anti-Abuse Rule**: A discount code can be used at most **once per customer** (non-cancelled orders).
-  - Discount is capped at the subtotal amount (order cannot have a negative total).
-- **Concurrency Safeguards**: Checkout transaction isolation retry boundaries and stock compensation logic from Phase 6 are fully preserved and unaffected.
+### Phase 9 — Discounts & Tax Engine
 
-### Endpoints & Payloads
+**Calculation order:**
+$$\text{Total} = (\text{Subtotal} - \text{Discount}) + \text{Tax on post-discount subtotal}$$
 
-#### 1. Preview/Validate Discount (Customer / Admin)
+**Discount validation rules:**
+- Code must exist and be `active = true`
+- Current timestamp must be within `[validFrom, validUntil]`
+- Cart subtotal must meet or exceed `minimumOrderAmount`
+- **Anti-abuse**: max **one use per customer** across non-cancelled orders
+- Discount amount is capped at subtotal (total cannot go negative)
+
+**Discount types:** `PERCENTAGE` (e.g. 10%) | `FLAT` (e.g. $15 off)
+
+**Tax:** Configurable via `app.tax-rate` (default `0.10`). Applied to post-discount subtotal.
+
 ```bash
-curl -X GET "http://localhost:8080/api/v1/discounts/validate?code=SAVE20&cartTotal=150.00" \
-  -H "Authorization: Bearer <customer_jwt_token>"
-```
-**Response (200 OK)**:
-```json
-{
-  "code": "SAVE20",
-  "type": "PERCENTAGE",
-  "value": 20.00,
-  "discountAmount": 30.00,
-  "eligible": true
-}
-```
+# Preview discount (CUSTOMER/ADMIN)
+curl "http://localhost:8080/api/v1/discounts/validate?code=SAVE10&cartTotal=100.00" \
+  -H "Authorization: Bearer <token>"
+# → {"code":"SAVE10","type":"PERCENTAGE","value":10.00,"discountAmount":10.00,"eligible":true}
 
-#### 2. Create Discount Code (Admin Only)
-```bash
+# Create discount (ADMIN)
 curl -X POST http://localhost:8080/api/v1/discounts \
-  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "SAVE10",
-    "type": "PERCENTAGE",
-    "value": 10.00,
-    "validFrom": "2026-07-01T00:00:00Z",
-    "validTo": "2026-07-31T23:59:59Z",
-    "minOrderValue": 50.00,
-    "active": true
+    "code":"SAVE10","type":"PERCENTAGE","value":10.00,
+    "minimumOrderAmount":50.00,"maxUsageCount":100,
+    "validFrom":"2024-01-01T00:00:00","validUntil":"2030-12-31T23:59:59","active":true
   }'
-```
 
-#### 3. Update Discount Code (Admin Only)
-```bash
+# Update discount (ADMIN)
 curl -X PUT http://localhost:8080/api/v1/discounts/<discount_id> \
-  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"code":"SAVE15","type":"PERCENTAGE","value":15.00,...}'
+
+# Deactivate discount (ADMIN)
+curl -X DELETE http://localhost:8080/api/v1/discounts/<discount_id> \
+  -H "Authorization: Bearer <admin_token>"
+
+# List all discounts (ADMIN)
+curl "http://localhost:8080/api/v1/discounts?page=0&size=20" \
+  -H "Authorization: Bearer <admin_token>"
+```
+
+---
+
+### Phase 10 — Returns & Refunds
+
+- Returns can only be initiated by the order's owner and only after the order reaches `DELIVERED`
+- Configurable return window: `app.return.window-days` (blocks requests past the deadline)
+- **Refund formula** (proportional, discount + tax aware):
+
+$$\text{Refund} = \text{Order Total} \times \frac{\text{Item Unit Price} \times \text{Returned Qty}}{\text{Order Subtotal}}$$
+
+- Approved returns trigger physical restocking: `quantityOnHand` is incremented at the original fulfillment warehouse
+- Full decision transaction: approve/reject + payment refund + inventory restock wrapped in a single DB transaction (failure rolls back to `PENDING` for retry)
+- `AuditLog` entry written asynchronously on decision
+
+**Return statuses:** `PENDING` → `APPROVED` / `REJECTED` → (if APPROVED) → `REFUNDED`
+
+```bash
+# Submit return (CUSTOMER — order must be DELIVERED)
+curl -X POST http://localhost:8080/api/v1/returns \
+  -H "Authorization: Bearer <customer_token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "SAVE10",
-    "type": "PERCENTAGE",
-    "value": 15.00,
-    "validFrom": "2026-07-01T00:00:00Z",
-    "validTo": "2026-07-31T23:59:59Z",
-    "minOrderValue": 50.00,
-    "active": true
+    "orderId":"<order_id>",
+    "reason":"Product arrived damaged",
+    "items":[{"orderItemId":"<item_id>","quantity":1}]
   }'
+
+# My returns (CUSTOMER)
+curl "http://localhost:8080/api/v1/returns?page=0&size=20" \
+  -H "Authorization: Bearer <customer_token>"
+
+# Return detail (CUSTOMER)
+curl http://localhost:8080/api/v1/returns/<return_id> \
+  -H "Authorization: Bearer <customer_token>"
+
+# All returns — staff view (ADMIN/WAREHOUSE_STAFF)
+curl "http://localhost:8080/api/v1/returns/staff?status=PENDING&page=0&size=20" \
+  -H "Authorization: Bearer <staff_token>"
+
+# Approve / reject return (ADMIN/WAREHOUSE_STAFF)
+curl -X PATCH http://localhost:8080/api/v1/returns/<return_id>/decision \
+  -H "Authorization: Bearer <staff_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"APPROVED","notes":"Damage confirmed, refund approved"}'
 ```
 
-#### 4. Soft Delete/Deactivate Discount Code (Admin Only)
-```bash
-curl -X DELETE http://localhost:8080/api/v1/discounts/<discount_id> \
-  -H "Authorization: Bearer <admin_jwt_token>"
-```
+---
 
-## Assumptions Log
+### Phase 11 — Final Polish & Test Reliability
 
-### Phase 1 Assumptions
-- **Primary Database Engine**: MySQL is selected as the primary relational database.
-- **ID Generation Strategy**: UUID is used for all primary keys. Since MySQL does not support a native `UUID` type, they are stored as `VARCHAR(36)` strings. This is highly portable, human-readable, and compatible with both MySQL and H2 databases.
-- **Concurrency Locking Strategy**: Leaning towards **Optimistic Locking** on `InventoryItem` using a `@Version` field (`version` column) to support high-throughput checkout updates while avoiding database deadlocks associated with pessimistic locking.
-- **AuditLog Metadata**: Stored as a `TEXT` data type containing a serialized JSON string to maximize database compatibility between MySQL and H2 without relying on vendor-specific JSONB dialect configurations.
-- **SQL Keyword Resolution**: Renamed the `value` column in the `discounts` table to `discount_value` on the database level, but mapped it to the Java field `value` to avoid parser errors on the reserved SQL keyword `value`.
+- Replaced all `Thread.sleep`-based async polling in integration tests with **Awaitility** for deterministic, flakiness-free async assertions
+- Full test suite: **127 tests across 10 integration test classes** covering all controllers + concurrency edge cases
+- OpenAPI / Swagger documentation updated with system description and versioning
+- All test classes verified to pass reliably with `./mvnw clean test`
 
-### Phase 2 Assumptions
-- **No Refresh Tokens**: A single access token flow with a 24-hour expiration duration is used. Refresh tokens, MFA, and SSO are out of scope for the current design.
-- **No Email Verification / Password Reset**: Users are activated immediately upon registration. Verification emails and self-service password recovery are out of scope.
-- **Role Escalation Prevention**: The public `/auth/register` endpoint only creates `CUSTOMER` accounts. Creating `ADMIN` and `WAREHOUSE_STAFF` users requires calling `/auth/admin/register`, which is restricted to authenticated users with `ROLE_ADMIN`.
-- **JWT Key Deployment**: The default development key is hardcoded for convenience during local development and automated testing, but must be overridden via the `JWT_SECRET` environment variable in production settings.
+---
 
-### Phase 3 Assumptions
-- **Nesting Descendants Search Resolution**: When filtering products by category ID, subcategories are recursively evaluated at the service layer rather than utilizing vendor-specific recursively nested SQL queries (CTE) for maximum portability between MySQL and H2.
-- **Visibility Rules for Soft-deleted Products**: Direct product lookups by ID of inactive products return `404 Not Found` for customers, but `200 OK` (returning details showing `active=false`) for admins/warehouse staff to allow viewing and editing historical logs.
-- **Category Name Uniqueness Constraint**: Category names are enforced to be unique globally (case-insensitive check) to prevent confusion at different tree levels.
+## API Endpoint Summary
 
-### Phase 4 Assumptions
-- **Database CHECK Constraint Compatibility**: Added follow-up Flyway migration `V2__inventory_constraints.sql` defining database-level CHECK constraints. This assumes standard check constraints are supported by the target MySQL server (supported in MySQL 8.0.16+) and H2 database for testing.
-- **Direct Inventory Auditing Synchronicity**: Direct manual stock sets/adjustments write synchronous audit logs inside the same database transaction. This guarantees instant consistency of direct admin edits. The asynchronous event-driven audit pipeline will be built in Phase 7 to record checkout and fulfillment event lifecycles.
-- **quantityReserved Initialization**: The `quantityReserved` field is initialized to `0` and is not modifiable by direct admin APIs in this phase. It will be managed exclusively via checkout lock mechanisms added in Phase 6.
-- **Simple Warehouses**: Location uses a descriptive text/address string rather than geo-coordinates. Spatial query functions are out of scope.
+| Module | Method | Path | Role |
+|---|---|---|---|
+| **Auth** | POST | `/api/v1/auth/register` | Public |
+| | POST | `/api/v1/auth/login` | Public |
+| | POST | `/api/v1/auth/admin/register` | ADMIN |
+| | GET | `/api/v1/auth/me` | Any authenticated |
+| **Categories** | POST | `/api/v1/categories` | ADMIN |
+| | PUT | `/api/v1/categories/{id}` | ADMIN |
+| | DELETE | `/api/v1/categories/{id}` | ADMIN |
+| | GET | `/api/v1/categories/{id}` | Public |
+| | GET | `/api/v1/categories` | Public |
+| **Products** | POST | `/api/v1/products` | ADMIN |
+| | PUT | `/api/v1/products/{id}` | ADMIN |
+| | DELETE | `/api/v1/products/{id}` | ADMIN |
+| | GET | `/api/v1/products/{id}` | Public |
+| | GET | `/api/v1/products` | Public |
+| **Warehouses** | POST | `/api/v1/warehouses` | ADMIN |
+| | PUT | `/api/v1/warehouses/{id}` | ADMIN |
+| | DELETE | `/api/v1/warehouses/{id}` | ADMIN |
+| | GET | `/api/v1/warehouses/{id}` | ADMIN / WAREHOUSE_STAFF |
+| | GET | `/api/v1/warehouses` | ADMIN / WAREHOUSE_STAFF |
+| **Inventory** | PUT | `/api/v1/inventory/{productId}/warehouse/{warehouseId}` | ADMIN |
+| | PATCH | `/api/v1/inventory/{productId}/warehouse/{warehouseId}/adjust` | ADMIN |
+| | GET | `/api/v1/inventory/product/{productId}` | ADMIN / WAREHOUSE_STAFF |
+| | GET | `/api/v1/inventory/warehouse/{warehouseId}` | ADMIN / WAREHOUSE_STAFF |
+| **Cart** | GET | `/api/v1/cart` | CUSTOMER |
+| | POST | `/api/v1/cart/items` | CUSTOMER |
+| | PATCH | `/api/v1/cart/items/{productId}` | CUSTOMER |
+| | DELETE | `/api/v1/cart/items/{productId}` | CUSTOMER |
+| | DELETE | `/api/v1/cart` | CUSTOMER |
+| **Checkout** | POST | `/api/v1/orders/checkout` | CUSTOMER |
+| **Orders** | GET | `/api/v1/orders` | CUSTOMER |
+| | GET | `/api/v1/orders/{id}` | CUSTOMER |
+| | POST | `/api/v1/orders/{id}/cancel` | CUSTOMER |
+| | GET | `/api/v1/orders/staff` | ADMIN / WAREHOUSE_STAFF |
+| | GET | `/api/v1/orders/staff/{id}` | ADMIN / WAREHOUSE_STAFF |
+| | PATCH | `/api/v1/orders/{id}/status` | ADMIN / WAREHOUSE_STAFF |
+| **Discounts** | POST | `/api/v1/discounts` | ADMIN |
+| | PUT | `/api/v1/discounts/{id}` | ADMIN |
+| | DELETE | `/api/v1/discounts/{id}` | ADMIN |
+| | GET | `/api/v1/discounts/{id}` | ADMIN |
+| | GET | `/api/v1/discounts` | ADMIN |
+| | GET | `/api/v1/discounts/validate` | CUSTOMER / ADMIN |
+| **Returns** | POST | `/api/v1/returns` | CUSTOMER |
+| | GET | `/api/v1/returns` | CUSTOMER |
+| | GET | `/api/v1/returns/{id}` | CUSTOMER |
+| | GET | `/api/v1/returns/staff` | ADMIN / WAREHOUSE_STAFF |
+| | PATCH | `/api/v1/returns/{id}/decision` | ADMIN / WAREHOUSE_STAFF |
 
-### Phase 5 Assumptions
-- **No cartId in Endpoints**: Carts are fetched and mutated transparently based on the customer's JWT authentication token rather than exposure via a path parameter (e.g., `/api/v1/cart/items` instead of `/api/v1/cart/{cartId}/items`). This prevents cross-tenant access and ID harvesting attacks.
-- **Implicit Cart Creation**: When a customer performs their first cart-related action (retrieving the cart or adding an item), an active cart is implicitly created. Customers do not need to call a separate endpoint to create their cart.
-- **Live Price and Subtotal Computations**: Subtotals and product unit prices are evaluated dynamically on read from current catalog prices. They are not stored/cached in the cart database record. This ensures the cart always reflects current store pricing.
-- **Advisory Stock Checking**: Stock level validation performed at cart add/update is soft/advisory. If stock is unavailable, an `availabilityWarning` is returned, but the item is still allowed in the cart. Hard inventory checks and lock reservations are deferred to Phase 6 checkout.
-- **Zero Quantity Item Removal**: Mutating a cart item quantity to `0` is equivalent to deletion. The line item is completely removed from the cart database record.
-- **Persistent Empty Carts**: Clearing a cart or removing the last item empties the items list but preserves the active cart record, allowing for simpler state tracking for future checkouts.
+---
 
-### Phase 6 Assumptions
-- **Pessimistic Lock Cart Resolution**: We resolve the customer's active cart with a `PESSIMISTIC_WRITE` lock to block rapid duplicate checkouts of the same cart from creating double orders.
-- **Isolation of Lock Retries**: Stock reservation is wrapped in `REQUIRES_NEW` propagation. This ensures retry attempts due to database contention are isolated and do not trigger a costly rollback/retry of the entire checkout transaction.
-- **Explicit Compensation for Stock**: Since reservation transactions commit independently, we explicitly catch payment failures or other checkout errors and run compensation logic to release reserved stock.
-- **Simulated Payment Gateway**: Payments are processed synchronously via a configurable mock service. Successful payments advance order status to `PLACED`, leaving the advance to `CONFIRMED` to the downstream fulfillment state machine (Phase 8).
-- **Tax Rate Placeholder**: Flat 10% tax rate is applied to the subtotal. Real discount logic is deferred to Phase 9.
+## Key Design Decisions & Assumptions
 
-### Phase 8 Assumptions
-- **404 vs 403 on Cross-Customer Detail Views**: To prevent information leakage (e.g., confirming the existence of a valid order ID to non-owners), we return `404 Not Found` (instead of `403 Forbidden`) if a customer attempts to query or cancel an order that belongs to another customer.
-- **ADMIN Override Power**: Administrators are given broader capabilities to cancel orders at any stage prior to delivery (`PLACED`, `CONFIRMED`, `PACKED`, `SHIPPED`). Doing so releases reserved warehouse stock. Warehouse staff cannot perform cancellations.
-- **Selective customerId Serialization**: The `customerId` field in `OrderSummaryResponse` is serialized only for staff and administrator queries. In order summary lists returned to customers, the `customerId` is set to `null` and excluded in output serialization via Jackson `@JsonInclude(NON_NULL)`.
+### Authentication
+- Single access-token flow (no refresh tokens, no MFA, no email verification)
+- Default JWT key is hardcoded for local dev; **must** be overridden via `JWT_SECRET` in production
+- `CUSTOMER` accounts are the only role creatable via the public registration endpoint
 
-### Phase 9 Assumptions
-- **One Discount Code per Order**: Customers can supply at most one discount code as part of a checkout request. Cart records display subtotals only.
-- **Tax on Post-Discount Amount**: Flat tax is calculated on the net order subtotal after applying the discount, consistent with standard retail invoicing rules.
-- **Configurable Flat Rate**: A single global tax rate is supported via properties configuration (`app.tax-rate`). Advanced regional tax jurisdiction mapping is out of scope.
-- **Anti-Abuse Capping**: Discount usage is tracked against customers and non-cancelled orders, capping usage at a maximum of one use per customer. Cancelled orders restore eligibility.
+### Catalog
+- Descendant category resolution for product search is done in-service (not via SQL CTEs) for H2/MySQL portability
+- Inactive product direct lookups: `404` for customers, `200` with `active=false` for staff/admin
 
-### Phase 10 Assumptions
-- **Customer Ownership & Status Restrictions**: Return requests can only be initiated by the customer who placed the order, and only after the order transitions to `DELIVERED`.
-- **Configurable Return Window**: Returns are blocked if the elapsed time since delivery exceeds a configurable window (e.g., 30 days, customized via `app.return.window-days`).
-- **Proportional Refund Formula**: Refunds are calculated using a proportional formula based on the item's unit price and quantity relative to the original order's subtotal and total:
-  $$\text{Refund Amount} = \text{Order Total Amount} \times \frac{\text{OrderItem Unit Price} \times \text{Returned Quantity}}{\text{Order Subtotal}}$$
-  This handles discount and tax adjustments proportionally.
-- **Physical Restocking**: Approved returns trigger physical restocking, increasing `quantityOnHand` back at the original warehouse the item was fulfilled from.
-- **Unified Transaction Rollback**: Return decisions (approving, payment gateway refund, inventory restocking) are wrapped in a single database transaction boundary. A failure in either payment refund or stock adjustment will roll back the transaction, keeping the request in `REQUESTED` status to allow retry attempts.
-- **Fulfillment Staff & Admin Authorization**: Both administrators and warehouse staff are authorized to decide on return requests, mapping to their shared order-visibility permissions in Phase 8.
+### Inventory
+- `quantityReserved` is managed exclusively by checkout and cancellation logic (not directly editable via admin APIs)
+- DB-level CHECK constraints (MySQL 8.0.16+ and H2 compatible) enforce non-negative stock invariants
+- All direct admin stock mutations write synchronous audit logs within the same transaction
 
+### Checkout & Concurrency
+- `PESSIMISTIC_WRITE` lock on the cart prevents concurrent double-checkouts
+- `@Version` optimistic locking with `REQUIRES_NEW` propagation isolates per-product retry boundaries
+- Payment failure triggers explicit stock compensation (does not rely on rollback, since reservations are in committed sub-transactions)
 
+### Orders
+- `404 Not Found` (not `403 Forbidden`) returned when a customer tries to access another customer's order — prevents ID enumeration
+- `customerId` excluded from customer-facing order list responses via `@JsonInclude(NON_NULL)`
+- WAREHOUSE_STAFF cannot cancel orders; only ADMIN can force-cancel
 
+### Discounts & Tax
+- One discount code per order maximum
+- Tax computed on post-discount subtotal (standard retail convention)
+- Per-customer usage tracked against non-cancelled orders (cancelled orders restore eligibility)
 
+### Returns & Refunds
+- Returns allowed only after `DELIVERED` status and within the configurable window (`app.return.window-days`)
+- Refund, stock restock, and status update are committed in a single transaction; any failure keeps status as `PENDING` for safe retry

@@ -21,6 +21,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import java.util.concurrent.TimeUnit;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -340,20 +342,10 @@ class OrderLifecycleIntegrationTest {
                 .andExpect(status().isOk());
 
         // Wait up to 3 seconds for async event handler to save AuditLog entry
-        long startTime = System.currentTimeMillis();
-        boolean auditLogSaved = false;
-        while (System.currentTimeMillis() - startTime < 3000) {
+        await().atMost(3, TimeUnit.SECONDS).until(() -> {
             List<AuditLog> logs = auditLogRepository.findAll();
-            long count = logs.stream()
-                    .filter(log -> log.getEntityId().equals(orderId) && log.getAction().equals("ORDER_STATUS_CHANGED"))
-                    .count();
-            if (count > 0) {
-                auditLogSaved = true;
-                break;
-            }
-            Thread.sleep(100);
-        }
-
-        assertTrue(auditLogSaved, "Expected async OrderStatusChangedEvent to save an AuditLog entry.");
+            return logs.stream()
+                    .anyMatch(log -> log.getEntityId().equals(orderId) && log.getAction().equals("ORDER_STATUS_CHANGED"));
+        });
     }
 }
