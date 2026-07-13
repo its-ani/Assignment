@@ -540,6 +540,16 @@ curl -X DELETE http://localhost:8080/api/v1/discounts/<discount_id> \
 - **Configurable Flat Rate**: A single global tax rate is supported via properties configuration (`app.tax-rate`). Advanced regional tax jurisdiction mapping is out of scope.
 - **Anti-Abuse Capping**: Discount usage is tracked against customers and non-cancelled orders, capping usage at a maximum of one use per customer. Cancelled orders restore eligibility.
 
+### Phase 10 Assumptions
+- **Customer Ownership & Status Restrictions**: Return requests can only be initiated by the customer who placed the order, and only after the order transitions to `DELIVERED`.
+- **Configurable Return Window**: Returns are blocked if the elapsed time since delivery exceeds a configurable window (e.g., 30 days, customized via `app.return.window-days`).
+- **Proportional Refund Formula**: Refunds are calculated using a proportional formula based on the item's unit price and quantity relative to the original order's subtotal and total:
+  $$\text{Refund Amount} = \text{Order Total Amount} \times \frac{\text{OrderItem Unit Price} \times \text{Returned Quantity}}{\text{Order Subtotal}}$$
+  This handles discount and tax adjustments proportionally.
+- **Physical Restocking**: Approved returns trigger physical restocking, increasing `quantityOnHand` back at the original warehouse the item was fulfilled from.
+- **Unified Transaction Rollback**: Return decisions (approving, payment gateway refund, inventory restocking) are wrapped in a single database transaction boundary. A failure in either payment refund or stock adjustment will roll back the transaction, keeping the request in `REQUESTED` status to allow retry attempts.
+- **Fulfillment Staff & Admin Authorization**: Both administrators and warehouse staff are authorized to decide on return requests, mapping to their shared order-visibility permissions in Phase 8.
+
 
 
 
