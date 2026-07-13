@@ -20,4 +20,5 @@ public class ProductResponse {
     private BigDecimal price;
     private boolean active;
     private Instant createdAt;
+    private ProductAvailabilitySummary availability;
 }
