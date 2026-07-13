@@ -30,6 +30,15 @@ public class ReturnRequest {
     @Column(nullable = false)
     private String reason;
 
+    @Column(nullable = false)
+    private int quantity;
+
+    @Column(name = "refund_amount", precision = 38, scale = 2)
+    private java.math.BigDecimal refundAmount;
+
+    @Column(name = "rejection_reason")
+    private String rejectionReason;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ReturnStatus status;

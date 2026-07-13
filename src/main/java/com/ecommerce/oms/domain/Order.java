@@ -40,6 +40,9 @@ public class Order {
     @Column(name = "discount_code")
     private String discountCode;
 
+    @Column(name = "delivered_at")
+    private Instant deliveredAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
