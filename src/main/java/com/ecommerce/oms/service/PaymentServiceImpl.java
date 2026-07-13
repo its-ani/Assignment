@@ -43,4 +43,24 @@ public class PaymentServiceImpl implements PaymentService {
 
         log.info("Payment successful for order ID: {}", order.getId());
     }
+
+    @Override
+    public void refund(Order order, java.math.BigDecimal amount) {
+        log.info("Processing refund simulation for order ID: {}, amount: {}", order.getId(), amount);
+
+        if (forceFailure) {
+            log.warn("Refund failed for order ID: {} due to app.payment.force-failure configuration", order.getId());
+            throw new com.ecommerce.oms.exception.PaymentFailedException("Refund failed (forced failure)");
+        }
+
+        if (failureRate > 0.0) {
+            double roll = random.nextDouble();
+            if (roll < failureRate) {
+                log.warn("Refund failed for order ID: {} due to simulated random failure rate", order.getId());
+                throw new com.ecommerce.oms.exception.PaymentFailedException("Refund failed (simulated failure rate)");
+            }
+        }
+
+        log.info("Refund successful for order ID: {} for amount: {}", order.getId(), amount);
+    }
 }

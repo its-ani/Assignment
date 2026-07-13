@@ -146,6 +146,10 @@ public class OrderServiceImpl implements OrderService {
             releaseInventoryReservations(orderId);
         }
 
+        if (newStatus == OrderStatus.DELIVERED) {
+            order.setDeliveredAt(Instant.now());
+        }
+
         order.setStatus(newStatus);
         order = orderRepository.save(order);
 
@@ -261,6 +265,7 @@ public class OrderServiceImpl implements OrderService {
                 .status(order.getStatus())
                 .totalAmount(order.getTotalAmount())
                 .itemCount(itemCount)
+                .deliveredAt(order.getDeliveredAt())
                 .createdAt(order.getCreatedAt())
                 .build();
     }
@@ -268,6 +273,7 @@ public class OrderServiceImpl implements OrderService {
     private OrderResponse mapToResponse(Order order, List<OrderItem> orderItems, Payment payment) {
         List<OrderItemResponse> itemResponses = orderItems.stream()
                 .map(item -> OrderItemResponse.builder()
+                        .id(item.getId())
                         .productId(item.getProduct().getId())
                         .productName(item.getProduct().getName())
                         .warehouseId(item.getWarehouse() != null ? item.getWarehouse().getId() : null)
@@ -291,6 +297,7 @@ public class OrderServiceImpl implements OrderService {
                 .discountAmount(order.getDiscountAmount())
                 .totalAmount(order.getTotalAmount())
                 .paymentStatus(payment != null ? payment.getStatus() : null)
+                .deliveredAt(order.getDeliveredAt())
                 .createdAt(order.getCreatedAt())
                 .build();
     }
