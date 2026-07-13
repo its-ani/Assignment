@@ -30,8 +30,11 @@ This document details the decisions, technical implementations, and integration 
 
 ## Database & Testing Gotchas
 
-### H2 MySQL Mode Compatibility
-- The project is configured with MySQL locally but uses an in-memory H2 database under the `test` profile (`spring.profiles.active: test`).
-- We configured the H2 test datasource as: `jdbc:h2:mem:testdb;MODE=MySQL;DATABASE_TO_LOWER=TRUE`.
-- H2 fully supports the `VARCHAR(36)` type used for our UUID primary keys.
-- Flyway migrations run successfully against H2 without dialect issues. The Flyway migration file `V1__init_schema.sql` compiles cleanly in both databases since standard MySQL syntax was used (avoiding Postgres-only types like `JSONB`, utilizing `TEXT` for the audit log metadata columns).
+### MySQL UUID String Insertion Gotcha
+- **Problem**: When inserting a user into the MySQL `users` table, Hibernate 6 threw: `SQL Error: 1366, SQLState: HY000: Incorrect string value: '\xFDQ4o\xB9\xAF...' for column 'id'`.
+- **Cause**: In Hibernate 6, the default JDBC mapping for `java.util.UUID` type defaults to `BINARY(16)`. However, our database schema defines ID columns as `VARCHAR(36)`. When saving entities, Hibernate attempted to bind UUID values as raw binary bytes. MySQL rejected these binary representations with charset validation errors.
+- **Solution**: We configured `hibernate.type.preferred_uuid_jdbc_type: CHAR` globally under `spring.jpa.properties`. This instructs Hibernate 6 to bind and extract all `java.util.UUID` properties as 36-character hyphenated strings, which maps perfectly to the database's `VARCHAR(36)` definitions.
+
+### Transitioning from H2 to MySQL for Integration Tests
+- **Decision**: In alignment with using MySQL as the sole source of truth and database engine, the integration test suite in `application-test.yml` was migrated to connect directly to the MySQL test schema (`oms_db` by default, or configurable via `DB_TEST_URL`).
+- **Validation**: Both local runtime execution (`dev` profile) and the test suite (`test` profile) now run against MySQL, ensuring 100% database dialect consistency. Flyway migrations run successfully and validate without errors on MySQL.
