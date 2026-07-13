@@ -103,6 +103,30 @@ public class InventoryReservationServiceImpl implements InventoryReservationServ
         inventoryItemRepository.save(item);
     }
 
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void fulfillReservation(UUID productId, UUID warehouseId, int quantity) {
+        log.info("Fulfilling reservation: decrementing quantityOnHand and quantityReserved by {} for product {} in warehouse {}", quantity, productId, warehouseId);
+        InventoryItem item = inventoryItemRepository.findByProductIdAndWarehouseId(productId, warehouseId)
+                .orElseThrow(() -> new IllegalArgumentException("Inventory item not found for product ID: " + productId +
+                        " and warehouse ID: " + warehouseId));
+
+        int newOnHand = item.getQuantityOnHand() - quantity;
+        if (newOnHand < 0) {
+            log.warn("quantityOnHand would go negative for product {} in warehouse {}. Clamping to 0.", productId, warehouseId);
+            newOnHand = 0;
+        }
+        item.setQuantityOnHand(newOnHand);
+
+        int newReserved = item.getQuantityReserved() - quantity;
+        if (newReserved < 0) {
+            newReserved = 0;
+        }
+        item.setQuantityReserved(newReserved);
+
+        inventoryItemRepository.save(item);
+    }
+
     @Recover
     public List<ReservationDetail> recover(OptimisticLockingFailureException e, UUID productId, int quantity) {
         log.error("Exhausted retries reserving stock for product {}. High contention detected.", productId, e);

@@ -146,6 +146,11 @@ public class OrderServiceImpl implements OrderService {
             releaseInventoryReservations(orderId);
         }
 
+        // Handle inventory fulfillment on shipment: decrement quantityOnHand and release quantityReserved
+        if (newStatus == OrderStatus.SHIPPED) {
+            fulfillInventoryOnShipment(orderId);
+        }
+
         if (newStatus == OrderStatus.DELIVERED) {
             order.setDeliveredAt(Instant.now());
         }
@@ -247,6 +252,20 @@ public class OrderServiceImpl implements OrderService {
         for (OrderItem item : items) {
             if (item.getWarehouse() != null) {
                 inventoryReservationService.releaseReservation(
+                        item.getProduct().getId(),
+                        item.getWarehouse().getId(),
+                        item.getQuantity()
+                );
+            }
+        }
+    }
+
+    private void fulfillInventoryOnShipment(UUID orderId) {
+        log.info("Fulfilling inventory for shipped order: {}. Decrementing quantityOnHand and quantityReserved.", orderId);
+        List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
+        for (OrderItem item : items) {
+            if (item.getWarehouse() != null) {
+                inventoryReservationService.fulfillReservation(
                         item.getProduct().getId(),
                         item.getWarehouse().getId(),
                         item.getQuantity()

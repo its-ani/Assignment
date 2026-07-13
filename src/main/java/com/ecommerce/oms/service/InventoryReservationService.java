@@ -7,4 +7,5 @@ import java.util.UUID;
 public interface InventoryReservationService {
     List<ReservationDetail> reserveProductStock(UUID productId, int quantity);
     void releaseReservation(UUID productId, UUID warehouseId, int quantity);
+    void fulfillReservation(UUID productId, UUID warehouseId, int quantity);
 }

@@ -4,7 +4,7 @@
 
 A production-grade, Spring Boot–based **E-Commerce Order Management System** implementing the full transactional lifecycle: authentication & RBAC, product catalog, multi-warehouse inventory, shopping cart, concurrent checkout with optimistic-locking retries, payment simulation, async event pipeline, full order lifecycle management, discount/tax engine, and returns & refunds processing.
 
-All 11 development phases are **complete**. The project ships with **127 integration tests** covering every controller, concurrency scenarios, and the async event pipeline.
+All 11 development phases are **complete**. The project ships with **131 integration tests** covering every controller, concurrency scenarios, the async event pipeline, and inventory lifecycle correctness.
 
 ---
 
@@ -57,7 +57,7 @@ The application starts on **port 8080**. Flyway automatically runs all migration
 ```bash
 ./mvnw clean test
 ```
-All 127 tests run against an in-memory H2 database under the `test` Spring profile. No external services are required.
+All 131 tests run against an in-memory H2 database under the `test` Spring profile. No external services are required.
 
 ### 5. Swagger UI
 Once running, browse the interactive API docs at:
@@ -94,6 +94,7 @@ On first startup, a `DatabaseInitializer` component seeds a default admin if no 
 │  OrderService │ InventoryService │ ReturnService        │
 │  DiscountValidationService │ TaxCalculationService      │
 │  RefundCalculationService │ PaymentService              │
+│  ReservationCleanupScheduler (background @Scheduled)    │
 └───────────────────────┬─────────────────────────────────┘
                         │ JPA Repositories
 ┌───────────────────────▼─────────────────────────────────┐
@@ -299,7 +300,8 @@ curl -X DELETE http://localhost:8080/api/v1/cart -H "Authorization: Bearer <cust
 - **Greedy warehouse-split strategy**: fulfils each cart item from the highest-stock warehouse first; splits across warehouses if needed
 - **Optimistic locking + retry**: `@Version` on `InventoryItem`; up to 5 retries with exponential backoff via Spring Retry
 - **Isolated reservation transactions**: each stock reservation runs in `REQUIRES_NEW` propagation so a retry on one product doesn't roll back others
-- **Explicit compensation**: payment failure after committed reservations triggers stock release
+- **Explicit compensation**: any failure (partial reservation, payment, etc.) after committed reservations triggers stock release via tracked `ReservedItemTracker` list
+- **Orphaned reservation safety net**: a background `ReservationCleanupScheduler` runs every 15 minutes to detect and release reservations not backed by active orders (guards against JVM crashes or failed compensation)
 - **Payment simulation**: configurable stub (forces failures in tests)
 - **Tax**: configurable flat rate via `app.tax-rate` (default 10%)
 - **Discount**: optional discount code applied at checkout (see Phase 9)
@@ -358,11 +360,22 @@ Response:
     │ (Warehouse Staff / Admin advance)                                        │
     ▼                                                                          │
 [ SHIPPED ] ──── Admin force-cancel ──────────────────────────────────────────┘
-    │
+    │         ▲ Inventory fulfilled:
+    │         │ quantityOnHand -= qty
+    │         │ quantityReserved -= qty
     │ (Warehouse Staff / Admin advance)
     ▼
 [ DELIVERED ] ──────────────────────────────────────────────────────────► [ RETURNED ]
 ```
+
+**Inventory operations per status transition:**
+
+| Transition | Inventory Effect |
+|---|---|
+| Any → `CANCELLED` | `quantityReserved` decremented (reservation released) |
+| `PACKED` → `SHIPPED` | `quantityOnHand` **and** `quantityReserved` both decremented (fulfillment) |
+| `SHIPPED` → `DELIVERED` | Timestamp set, no inventory change (already fulfilled) |
+| All other transitions | No inventory change |
 
 **RBAC for orders:**
 
@@ -376,6 +389,7 @@ Response:
 
 - Cross-customer order access returns `404 Not Found` (not `403`) to prevent ID enumeration
 - Cancellation releases `quantityReserved` on all associated `InventoryItem` records
+- Shipment fulfils inventory: decrements both `quantityOnHand` and `quantityReserved`, keeping `quantityAvailable` consistent
 - `customerId` is stripped from order list responses returned to customers
 
 ```bash
@@ -504,9 +518,19 @@ curl -X PATCH http://localhost:8080/api/v1/returns/<return_id>/decision \
 ### Phase 11 — Final Polish & Test Reliability
 
 - Replaced all `Thread.sleep`-based async polling in integration tests with **Awaitility** for deterministic, flakiness-free async assertions
-- Full test suite: **127 tests across 10 integration test classes** covering all controllers + concurrency edge cases
+- Full test suite: **131 tests across 11 test classes** covering all controllers, concurrency edge cases, and inventory lifecycle correctness
 - OpenAPI / Swagger documentation updated with system description and versioning
 - All test classes verified to pass reliably with `./mvnw clean test`
+
+---
+
+### Phase 12 — Inventory Lifecycle Fixes
+
+Two critical inventory management bugs were identified and fixed:
+
+1. **Inventory fulfillment on SHIPPED**: When an order transitions to `SHIPPED`, both `quantityOnHand` and `quantityReserved` are now decremented. Previously, neither was adjusted on shipment, causing `quantityReserved` to grow infinitely and `quantityAvailable` to trend toward zero after successful orders.
+
+2. **Orphaned reservation cleanup**: A `ReservationCleanupScheduler` (`@Scheduled`, every 15 minutes, configurable via `reservation.cleanup.interval-ms`) detects and releases `quantityReserved` values not backed by active orders (`PLACED`/`CONFIRMED`/`PACKED`). This guards against JVM crashes or network failures that could leave committed `REQUIRES_NEW` reservations without a corresponding `Order` record.
 
 ---
 
@@ -575,14 +599,17 @@ curl -X PATCH http://localhost:8080/api/v1/returns/<return_id>/decision \
 - Inactive product direct lookups: `404` for customers, `200` with `active=false` for staff/admin
 
 ### Inventory
-- `quantityReserved` is managed exclusively by checkout and cancellation logic (not directly editable via admin APIs)
+- `quantityReserved` is managed exclusively by checkout, cancellation, and shipment fulfillment logic (not directly editable via admin APIs)
+- On `SHIPPED`: `quantityOnHand` and `quantityReserved` are both decremented to reflect physical stock departure and reservation fulfillment
+- A `ReservationCleanupScheduler` runs every 15 minutes to release orphaned reservations not backed by active orders
 - DB-level CHECK constraints (MySQL 8.0.16+ and H2 compatible) enforce non-negative stock invariants
 - All direct admin stock mutations write synchronous audit logs within the same transaction
 
 ### Checkout & Concurrency
 - `PESSIMISTIC_WRITE` lock on the cart prevents concurrent double-checkouts
 - `@Version` optimistic locking with `REQUIRES_NEW` propagation isolates per-product retry boundaries
-- Payment failure triggers explicit stock compensation (does not rely on rollback, since reservations are in committed sub-transactions)
+- Any failure (partial reservation, payment, etc.) triggers explicit stock compensation via a tracked `ReservedItemTracker` list (does not rely on rollback, since reservations are in committed sub-transactions)
+- Orphaned reservations from JVM crashes or failed compensation are cleaned up by the `ReservationCleanupScheduler` background job
 
 ### Orders
 - `404 Not Found` (not `403 Forbidden`) returned when a customer tries to access another customer's order — prevents ID enumeration

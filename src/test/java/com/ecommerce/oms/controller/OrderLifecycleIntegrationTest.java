@@ -205,6 +205,11 @@ class OrderLifecycleIntegrationTest {
         Order order = createOrder(customer1, OrderStatus.PLACED);
         UUID orderId = order.getId();
 
+        // Verify initial inventory state: quantityOnHand=10, quantityReserved=2
+        InventoryItem preInv = inventoryItemRepository.findByProductIdAndWarehouseId(product.getId(), warehouse.getId()).orElseThrow();
+        assertEquals(10, preInv.getQuantityOnHand());
+        assertEquals(2, preInv.getQuantityReserved());
+
         // 1. Walk PLACED -> CONFIRMED
         mockMvc.perform(patch("/api/v1/orders/" + orderId + "/status")
                         .header("Authorization", "Bearer " + warehouseToken)
@@ -229,6 +234,11 @@ class OrderLifecycleIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status", is("SHIPPED")));
 
+        // Verify inventory fulfillment: quantityOnHand decremented by 2, quantityReserved decremented by 2
+        InventoryItem postShipInv = inventoryItemRepository.findByProductIdAndWarehouseId(product.getId(), warehouse.getId()).orElseThrow();
+        assertEquals(8, postShipInv.getQuantityOnHand(), "quantityOnHand should be decremented by 2 on SHIPPED");
+        assertEquals(0, postShipInv.getQuantityReserved(), "quantityReserved should be decremented by 2 on SHIPPED");
+
         // 4. Walk SHIPPED -> DELIVERED
         mockMvc.perform(patch("/api/v1/orders/" + orderId + "/status")
                         .header("Authorization", "Bearer " + warehouseToken)
@@ -236,6 +246,11 @@ class OrderLifecycleIntegrationTest {
                         .content(objectMapper.writeValueAsString(new OrderStatusUpdateRequest(OrderStatus.DELIVERED))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status", is("DELIVERED")));
+
+        // Verify inventory unchanged after DELIVERED (fulfillment already happened on SHIPPED)
+        InventoryItem postDelivInv = inventoryItemRepository.findByProductIdAndWarehouseId(product.getId(), warehouse.getId()).orElseThrow();
+        assertEquals(8, postDelivInv.getQuantityOnHand(), "quantityOnHand should remain unchanged after DELIVERED");
+        assertEquals(0, postDelivInv.getQuantityReserved(), "quantityReserved should remain 0 after DELIVERED");
     }
 
     @Test

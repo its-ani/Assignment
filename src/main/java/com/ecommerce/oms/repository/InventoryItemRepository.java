@@ -13,4 +13,5 @@ public interface InventoryItemRepository extends JpaRepository<InventoryItem, UU
     List<InventoryItem> findByProductId(UUID productId);
     List<InventoryItem> findByWarehouseId(UUID warehouseId);
     boolean existsByWarehouseId(UUID warehouseId);
+    List<InventoryItem> findByQuantityReservedGreaterThan(int threshold);
 }
