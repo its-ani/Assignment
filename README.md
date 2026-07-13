@@ -181,6 +181,77 @@ Supports searching by keyword, price range, category filter (recursively compili
 curl -X GET "http://localhost:8080/api/v1/products?categoryId=<electronics_category_id>&includeDescendants=true&keyword=macbook&minPrice=1000.00&maxPrice=3000.00&page=0&size=10&sortBy=price&direction=asc"
 ```
 
+## Warehouse & Inventory Management (Phase 4)
+
+### Features & Security Access
+- **Warehouse CRUD**: Restricted to `ADMIN` for creation, update, and deletion. `WAREHOUSE_STAFF` can read warehouses, while `CUSTOMER` and anonymous callers are forbidden (`403 Forbidden`).
+- **Warehouse Delete Guard**: Deletion of a warehouse is blocked (`409 Conflict`) if any inventory item mapping is associated with it.
+- **Stock Visibility (Public vs. Private)**: 
+  - `CUSTOMER` and anonymous users can view an aggregate availability signal `availability` nested under product response endpoints (e.g. `available: true/false`, and `totalAvailableQuantity`). They cannot see detailed per-warehouse stock breakdowns.
+  - `ADMIN` and `WAREHOUSE_STAFF` can retrieve full detailed breakdowns of inventory (physical `quantityOnHand`, pending `quantityReserved`, and derived `quantityAvailable` calculated as `quantityOnHand - quantityReserved`).
+- **Inventory Mutations (Admin Only)**:
+  - **Absolute Stock Set**: `PUT /api/v1/inventory/{productId}/warehouse/{warehouseId}` sets the exact physical stock quantity.
+  - **Relative Stock Adjustment**: `PATCH /api/v1/inventory/{productId}/warehouse/{warehouseId}/adjust` increments or decrements physical stock by a delta.
+- **Safety Guards**:
+  - Stock updates must never result in a negative `quantityOnHand`.
+  - Reserved stock (`quantityReserved`) must never exceed physical stock (`quantityOnHand`).
+  - Violation of these guards results in a `409 Conflict` (for relative adjust and absolute sets that violate the constraints).
+- **Synchronous Audit Logging**: Every inventory edit (creation, set, or adjust) synchronously writes a log to the `audit_logs` table in the same transaction, recording the before/after values and the authenticated email.
+
+### API Usage Examples (cURL)
+
+#### 1. Create a Warehouse (Admin Only)
+```bash
+curl -X POST http://localhost:8080/api/v1/warehouses \
+  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Central Distribution Center",
+    "location": "123 Industrial Parkway, Chicago, IL"
+  }'
+```
+
+#### 2. Set Warehouse Stock (Admin Only)
+```bash
+curl -X PUT http://localhost:8080/api/v1/inventory/<product_uuid>/warehouse/<warehouse_uuid> \
+  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "quantityOnHand": 100
+  }'
+```
+
+#### 3. Adjust Stock by Delta (Admin Only)
+```bash
+curl -X PATCH http://localhost:8080/api/v1/inventory/<product_uuid>/warehouse/<warehouse_uuid>/adjust \
+  -H "Authorization: Bearer <admin_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "delta": -10,
+    "reason": "Damaged stock return"
+  }'
+```
+
+#### 4. View Product with Public Availability Summary (Public)
+```bash
+curl -X GET http://localhost:8080/api/v1/products/<product_uuid>
+```
+Response:
+```json
+{
+  "id": "abc-...",
+  "name": "Smartphone",
+  "description": "Premium mobile",
+  "price": 599.99,
+  "active": true,
+  "availability": {
+    "productId": "abc-...",
+    "available": true,
+    "totalAvailableQuantity": 90
+  }
+}
+```
+
 ## Assumptions Log
 
 ### Phase 1 Assumptions
@@ -200,4 +271,10 @@ curl -X GET "http://localhost:8080/api/v1/products?categoryId=<electronics_categ
 - **Nesting Descendants Search Resolution**: When filtering products by category ID, subcategories are recursively evaluated at the service layer rather than utilizing vendor-specific recursively nested SQL queries (CTE) for maximum portability between MySQL and H2.
 - **Visibility Rules for Soft-deleted Products**: Direct product lookups by ID of inactive products return `404 Not Found` for customers, but `200 OK` (returning details showing `active=false`) for admins/warehouse staff to allow viewing and editing historical logs.
 - **Category Name Uniqueness Constraint**: Category names are enforced to be unique globally (case-insensitive check) to prevent confusion at different tree levels.
+
+### Phase 4 Assumptions
+- **Database CHECK Constraint Compatibility**: Added follow-up Flyway migration `V2__inventory_constraints.sql` defining database-level CHECK constraints. This assumes standard check constraints are supported by the target MySQL server (supported in MySQL 8.0.16+) and H2 database for testing.
+- **Direct Inventory Auditing Synchronicity**: Direct manual stock sets/adjustments write synchronous audit logs inside the same database transaction. This guarantees instant consistency of direct admin edits. The asynchronous event-driven audit pipeline will be built in Phase 7 to record checkout and fulfillment event lifecycles.
+- **quantityReserved Initialization**: The `quantityReserved` field is initialized to `0` and is not modifiable by direct admin APIs in this phase. It will be managed exclusively via checkout lock mechanisms added in Phase 6.
+- **Simple Warehouses**: Location uses a descriptive text/address string rather than geo-coordinates. Spatial query functions are out of scope.
 
