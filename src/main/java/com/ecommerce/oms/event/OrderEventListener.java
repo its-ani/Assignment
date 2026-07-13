@@ -54,4 +54,23 @@ public class OrderEventListener {
         auditLogRepository.save(auditLog);
         log.info("Successfully created audit log for status change on order: {}", event.getOrderId());
     }
+
+    @Async("taskExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleReturnStatusChanged(ReturnStatusChangedEvent event) {
+        log.info("Processing ReturnStatusChangedEvent for return request: {}. Old status: {}, New status: {}, Actor: {}", 
+                event.getReturnRequestId(), event.getOldStatus(), event.getNewStatus(), event.getActor());
+        
+        AuditLog auditLog = AuditLog.builder()
+                .entityType("RETURN_REQUEST")
+                .entityId(event.getReturnRequestId())
+                .action("RETURN_STATUS_CHANGED")
+                .actor(event.getActor())
+                .timestamp(event.getTimestamp() != null ? event.getTimestamp() : Instant.now())
+                .metadata(event.getMetadata() != null ? event.getMetadata() : "{}")
+                .build();
+        
+        auditLogRepository.save(auditLog);
+        log.info("Successfully created audit log for status change on return request: {}", event.getReturnRequestId());
+    }
 }
