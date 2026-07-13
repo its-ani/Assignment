@@ -8,6 +8,8 @@ import com.ecommerce.oms.exception.ResourceNotFoundException;
 import com.ecommerce.oms.repository.CategoryRepository;
 import com.ecommerce.oms.repository.ProductRepository;
 import com.ecommerce.oms.repository.ProductSpecification;
+import com.ecommerce.oms.dto.ProductAvailabilitySummary;
+import com.ecommerce.oms.repository.InventoryItemRepository;
 import com.ecommerce.oms.security.SecurityUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,15 +28,18 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
     private final CategoryService categoryService;
+    private final InventoryItemRepository inventoryItemRepository;
 
     public ProductService(
             ProductRepository productRepository,
             CategoryRepository categoryRepository,
-            CategoryService categoryService
+            CategoryService categoryService,
+            InventoryItemRepository inventoryItemRepository
     ) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.categoryService = categoryService;
+        this.inventoryItemRepository = inventoryItemRepository;
     }
 
     @Transactional
@@ -135,6 +140,17 @@ public class ProductService {
     }
 
     private ProductResponse mapToResponse(Product product) {
+        List<com.ecommerce.oms.domain.InventoryItem> items = inventoryItemRepository.findByProductId(product.getId());
+        int totalAvailable = items.stream()
+                .mapToInt(item -> item.getQuantityOnHand() - item.getQuantityReserved())
+                .sum();
+
+        ProductAvailabilitySummary availability = ProductAvailabilitySummary.builder()
+                .productId(product.getId())
+                .available(totalAvailable > 0)
+                .totalAvailableQuantity(totalAvailable)
+                .build();
+
         return ProductResponse.builder()
                 .id(product.getId())
                 .name(product.getName())
@@ -144,6 +160,7 @@ public class ProductService {
                 .price(product.getPrice())
                 .active(product.isActive())
                 .createdAt(product.getCreatedAt())
+                .availability(availability)
                 .build();
     }
 }

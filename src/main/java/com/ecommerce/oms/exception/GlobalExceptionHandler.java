@@ -61,6 +61,16 @@ public class GlobalExceptionHandler {
         return buildErrorResponse(HttpStatus.CONFLICT, "Conflict", ex.getMessage(), request.getRequestURI(), null);
     }
 
+    @ExceptionHandler(WarehouseHasInventoryException.class)
+    public ResponseEntity<ErrorResponse> handleWarehouseHasInventoryException(WarehouseHasInventoryException ex, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.CONFLICT, "Conflict", ex.getMessage(), request.getRequestURI(), null);
+    }
+
+    @ExceptionHandler(InvalidInventoryOperationException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidInventoryOperationException(InvalidInventoryOperationException ex, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.CONFLICT, "Conflict", ex.getMessage(), request.getRequestURI(), null);
+    }
+
     @ExceptionHandler(DuplicateResourceException.class)
     public ResponseEntity<ErrorResponse> handleDuplicateResourceException(DuplicateResourceException ex, HttpServletRequest request) {
         return buildErrorResponse(HttpStatus.CONFLICT, "Conflict", ex.getMessage(), request.getRequestURI(), null);
