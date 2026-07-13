@@ -22,5 +22,6 @@ public class OrderSummaryResponse {
     private OrderStatus status;
     private BigDecimal totalAmount;
     private int itemCount;
+    private Instant deliveredAt;
     private Instant createdAt;
 }

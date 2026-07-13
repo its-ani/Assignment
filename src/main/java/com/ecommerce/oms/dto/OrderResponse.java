@@ -21,5 +21,6 @@ public class OrderResponse {
     private BigDecimal discountAmount;
     private BigDecimal totalAmount;
     private PaymentStatus paymentStatus;
+    private Instant deliveredAt;
     private Instant createdAt;
 }

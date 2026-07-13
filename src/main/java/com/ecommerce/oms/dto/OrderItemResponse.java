@@ -9,6 +9,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class OrderItemResponse {
+    private UUID id;
     private UUID productId;
     private String productName;
     private UUID warehouseId;
