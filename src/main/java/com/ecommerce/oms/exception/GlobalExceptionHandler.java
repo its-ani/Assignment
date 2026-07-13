@@ -51,6 +51,16 @@ public class GlobalExceptionHandler {
         return buildErrorResponse(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage(), request.getRequestURI(), null);
     }
 
+    @ExceptionHandler({
+            DiscountExpiredException.class,
+            DiscountInactiveException.class,
+            MinimumOrderValueNotMetException.class,
+            DiscountAlreadyUsedException.class
+    })
+    public ResponseEntity<ErrorResponse> handleDiscountValidationExceptions(RuntimeException ex, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage(), request.getRequestURI(), null);
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFoundException(ResourceNotFoundException ex, HttpServletRequest request) {
         return buildErrorResponse(HttpStatus.NOT_FOUND, "Not Found", ex.getMessage(), request.getRequestURI(), null);

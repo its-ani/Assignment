@@ -34,9 +34,8 @@ public class CheckoutServiceImpl implements CheckoutService {
     private final InventoryReservationService inventoryReservationService;
     private final PaymentService paymentService;
     private final ApplicationEventPublisher eventPublisher;
-
-    @Value("${app.tax-rate:0.10}")
-    private double taxRate;
+    private final DiscountValidationService discountValidationService;
+    private final TaxCalculationService taxCalculationService;
 
     private static class ReservedItemTracker {
         private final UUID productId;
@@ -98,9 +97,25 @@ public class CheckoutServiceImpl implements CheckoutService {
             }
             subtotal = subtotal.setScale(2, RoundingMode.HALF_UP);
 
-            BigDecimal taxAmount = subtotal.multiply(BigDecimal.valueOf(taxRate)).setScale(2, RoundingMode.HALF_UP);
             BigDecimal discountAmount = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
-            BigDecimal totalAmount = subtotal.add(taxAmount).subtract(discountAmount).setScale(2, RoundingMode.HALF_UP);
+            String appliedDiscountCode = null;
+            if (request.getDiscountCode() != null && !request.getDiscountCode().trim().isEmpty()) {
+                Discount discount = discountValidationService.validate(request.getDiscountCode(), subtotal, customerId);
+                appliedDiscountCode = discount.getCode();
+                if (discount.getType() == DiscountType.PERCENTAGE) {
+                    discountAmount = subtotal.multiply(discount.getValue())
+                            .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                } else if (discount.getType() == DiscountType.FLAT) {
+                    discountAmount = discount.getValue().setScale(2, RoundingMode.HALF_UP);
+                }
+                if (discountAmount.compareTo(subtotal) > 0) {
+                    discountAmount = subtotal;
+                }
+            }
+
+            BigDecimal postDiscountSubtotal = subtotal.subtract(discountAmount);
+            BigDecimal taxAmount = taxCalculationService.calculateTax(postDiscountSubtotal);
+            BigDecimal totalAmount = postDiscountSubtotal.add(taxAmount).setScale(2, RoundingMode.HALF_UP);
 
             // 5. Create and save Order (status=PLACED)
             User customer = cart.getCustomer();
@@ -110,6 +125,7 @@ public class CheckoutServiceImpl implements CheckoutService {
                     .taxAmount(taxAmount)
                     .discountAmount(discountAmount)
                     .totalAmount(totalAmount)
+                    .discountCode(appliedDiscountCode)
                     .build();
             order = orderRepository.save(order);
 
