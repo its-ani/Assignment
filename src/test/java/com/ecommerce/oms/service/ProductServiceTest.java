@@ -7,6 +7,7 @@ import com.ecommerce.oms.dto.ProductResponse;
 import com.ecommerce.oms.exception.ResourceNotFoundException;
 import com.ecommerce.oms.repository.CategoryRepository;
 import com.ecommerce.oms.repository.ProductRepository;
+import com.ecommerce.oms.repository.InventoryItemRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,6 +40,9 @@ class ProductServiceTest {
 
     @Mock
     private CategoryService categoryService;
+
+    @Mock
+    private InventoryItemRepository inventoryItemRepository;
 
     @InjectMocks
     private ProductService productService;
