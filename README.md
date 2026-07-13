@@ -43,7 +43,7 @@ To run tests using the in-memory H2 database under the `test` profile:
 - **Phase 3**: Catalog & Product Information Management (Completed)
 - **Phase 4**: Inventory & Warehouse Management (Pending)
 - **Phase 5**: Cart Operations & Price Calculation (Pending)
-- **Phase 6**: Order Placement & Checkout Transaction (Pending)
+- **Phase 6**: Order Placement & Checkout Transaction (Completed)
 - **Phase 7**: State Machine for Order Lifecycle (Pending)
 - **Phase 8**: Returns Processing & Refunds (Pending)
 - **Phase 9**: Payment Integration & Audit Logs (Pending)
@@ -317,6 +317,50 @@ curl -X DELETE http://localhost:8080/api/v1/cart \
   -H "Authorization: Bearer <customer_jwt_token>"
 ```
 
+## Order Placement & Checkout (Phase 6)
+
+### Features & Security Access
+- **Pessimistic-Lock Idempotency**: Active carts are resolved using a `PESSIMISTIC_WRITE` lock and immediately transitioned to `CHECKED_OUT` status at the start of the checkout transaction to prevent concurrent double-submissions.
+- **Warehouse-splitting Greedy Strategy**: Orders are fulfilled using a highest-stock-first strategy across warehouses, splitting a single cart item into multiple order items if necessary to fulfill the requested quantity.
+- **Optimistic Locking Retry Loop**: Concurrency on stock reservation is handled using JPA `@Version` optimistic locking with up to 5 automatic retries and exponential backoff.
+- **Independent Transaction Isolation**: Individual stock reservations run in isolated transactions (`propagation = Propagation.REQUIRES_NEW`), preventing lock retries on one product from rolling back the entire checkout.
+- **Explicit Compensation**: If checkout fails after reservations are committed (e.g. payment failure), reserved stock is explicitly released back to the inventory via compensating actions.
+- **Configurable Payment Stub**: Simulates payment collection and forces failures dynamically during testing.
+- **Tax Placeholder**: Computes a flat 10% tax rate.
+
+### API Usage Examples (cURL)
+
+#### 1. Checkout Active Cart (Customer Only)
+```bash
+curl -X POST http://localhost:8080/api/v1/orders/checkout \
+  -H "Authorization: Bearer <customer_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+Response:
+```json
+{
+  "id": "e9e8efec-3158-454a-94d1-b9f5155e4e46",
+  "status": "PLACED",
+  "items": [
+    {
+      "productId": "ab867f53-cf60-446f-b598-38e418bb1f26",
+      "productName": "Laptop",
+      "warehouseId": "5322efec-3158-454a-94d1-b9f5155e4e46",
+      "quantity": 1,
+      "unitPrice": 1000.00,
+      "lineTotal": 1000.00
+    }
+  ],
+  "subtotal": 1000.00,
+  "taxAmount": 100.00,
+  "discountAmount": 0.00,
+  "totalAmount": 1100.00,
+  "paymentStatus": "SUCCESS",
+  "createdAt": "2026-07-13T23:31:16Z"
+}
+```
+
 ## Assumptions Log
 
 ### Phase 1 Assumptions
@@ -350,5 +394,13 @@ curl -X DELETE http://localhost:8080/api/v1/cart \
 - **Advisory Stock Checking**: Stock level validation performed at cart add/update is soft/advisory. If stock is unavailable, an `availabilityWarning` is returned, but the item is still allowed in the cart. Hard inventory checks and lock reservations are deferred to Phase 6 checkout.
 - **Zero Quantity Item Removal**: Mutating a cart item quantity to `0` is equivalent to deletion. The line item is completely removed from the cart database record.
 - **Persistent Empty Carts**: Clearing a cart or removing the last item empties the items list but preserves the active cart record, allowing for simpler state tracking for future checkouts.
+
+### Phase 6 Assumptions
+- **Pessimistic Lock Cart Resolution**: We resolve the customer's active cart with a `PESSIMISTIC_WRITE` lock to block rapid duplicate checkouts of the same cart from creating double orders.
+- **Isolation of Lock Retries**: Stock reservation is wrapped in `REQUIRES_NEW` propagation. This ensures retry attempts due to database contention are isolated and do not trigger a costly rollback/retry of the entire checkout transaction.
+- **Explicit Compensation for Stock**: Since reservation transactions commit independently, we explicitly catch payment failures or other checkout errors and run compensation logic to release reserved stock.
+- **Simulated Payment Gateway**: Payments are processed synchronously via a configurable mock service. Successful payments advance order status to `PLACED`, leaving the advance to `CONFIRMED` to the downstream fulfillment state machine (Phase 8).
+- **Tax Rate Placeholder**: Flat 10% tax rate is applied to the subtotal. Real discount logic is deferred to Phase 9.
+
 
 
