@@ -24,6 +24,10 @@ public class JwtService {
     @Value("${app.security.jwt.expiration-ms}")
     private long expirationMs;
 
+    public long getExpirationMs() {
+        return expirationMs;
+    }
+
     private SecretKey getSigningKey() {
         return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
