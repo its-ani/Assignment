@@ -27,7 +27,6 @@ All 11 development phases are **complete**. The project ships with **127 integra
 ---
 
 ## Getting Started
-
 ### 1. Start MySQL (Docker)
 ```bash
 docker run --name oms-mysql \
