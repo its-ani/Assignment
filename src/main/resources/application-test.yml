@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: ${DB_TEST_URL:jdbc:mysql://localhost:3306/oms_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:Root@123}
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 10
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        type:
+          preferred_uuid_jdbc_type: CHAR
+  flyway:
+    enabled: true
+    clean-disabled: false
+    clean-on-validation-error: true
