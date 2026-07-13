@@ -51,6 +51,17 @@ class AuthControllerIntegrationTest {
                 userRepository.delete(user);
             }
         });
+
+        // Re-seed default admin if missing
+        if (!userRepository.existsByEmail("admin@ecommerce.com")) {
+            User defaultAdmin = User.builder()
+                    .name("Administrator")
+                    .email("admin@ecommerce.com")
+                    .passwordHash(passwordEncoder.encode("AdminPass123!"))
+                    .role(UserRole.ADMIN)
+                    .build();
+            userRepository.save(defaultAdmin);
+        }
     }
 
     @Test
