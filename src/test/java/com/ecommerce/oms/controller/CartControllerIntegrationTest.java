@@ -55,6 +55,15 @@ class CartControllerIntegrationTest {
     private CartRepository cartRepository;
 
     @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private OrderItemRepository orderItemRepository;
+
+    @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
     private JwtService jwtService;
 
     private String customerToken;
@@ -69,12 +78,16 @@ class CartControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        paymentRepository.deleteAll();
+        orderItemRepository.deleteAll();
+        orderRepository.deleteAll();
         cartRepository.deleteAll();
         inventoryItemRepository.deleteAll();
         warehouseRepository.deleteAll();
         productRepository.deleteAll();
         categoryRepository.deleteAll();
         userRepository.deleteAll();
+        userRepository.flush();
 
         User customer = User.builder()
                 .name("Customer User")

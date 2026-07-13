@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -74,6 +75,9 @@ class CheckoutControllerIntegrationTest {
     private PaymentRepository paymentRepository;
 
     @Autowired
+    private DiscountRepository discountRepository;
+
+    @Autowired
     private JwtService jwtService;
 
     @Autowired
@@ -106,6 +110,7 @@ class CheckoutControllerIntegrationTest {
         productRepository.deleteAll();
         categoryRepository.deleteAll();
         userRepository.deleteAll();
+        discountRepository.deleteAll();
 
         customerUser = User.builder()
                 .name("Customer User")
@@ -519,6 +524,206 @@ class CheckoutControllerIntegrationTest {
         assertEquals(2, finalLa.getQuantityReserved(), "LA should be fully reserved (2)");
     }
 
+    @Test
+    void testCheckoutWithValidPercentageDiscount() throws Exception {
+        // Setup discount code
+        Discount discount = Discount.builder()
+                .code("SAVE20")
+                .type(DiscountType.PERCENTAGE)
+                .value(new BigDecimal("20.00"))
+                .validFrom(Instant.now().minus(1, java.time.temporal.ChronoUnit.HOURS))
+                .validTo(Instant.now().plus(24, java.time.temporal.ChronoUnit.HOURS))
+                .minOrderValue(new BigDecimal("50.00"))
+                .active(true)
+                .build();
+        discountRepository.save(discount);
+
+        // Setup inventory
+        InventoryItem inv = InventoryItem.builder()
+                .product(product1)
+                .warehouse(warehouse1)
+                .quantityOnHand(10)
+                .quantityReserved(0)
+                .build();
+        inventoryItemRepository.save(inv);
+
+        // Add item to cart
+        Cart cart = Cart.builder().customer(customerUser).status(CartStatus.ACTIVE).build();
+        cartRepository.save(cart);
+        CartItem item = CartItem.builder().cart(cart).product(product1).quantity(1).build();
+        cartItemRepository.save(item);
+
+        CheckoutRequest request = CheckoutRequest.builder()
+                .discountCode("SAVE20")
+                .build();
+
+        // Perform checkout
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .header("Authorization", "Bearer " + customerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id", notNullValue()))
+                .andExpect(jsonPath("$.status", is("PLACED")))
+                .andExpect(jsonPath("$.subtotal", is(1000.00)))
+                .andExpect(jsonPath("$.discountAmount", is(200.00)))
+                .andExpect(jsonPath("$.taxAmount", is(80.00))) // 10% of 800
+                .andExpect(jsonPath("$.totalAmount", is(880.00)))
+                .andExpect(jsonPath("$.paymentStatus", is("SUCCESS")));
+    }
+
+    @Test
+    void testCheckoutWithValidFlatDiscount() throws Exception {
+        // Setup discount code
+        Discount discount = Discount.builder()
+                .code("FLAT50")
+                .type(DiscountType.FLAT)
+                .value(new BigDecimal("50.00"))
+                .validFrom(Instant.now().minus(1, java.time.temporal.ChronoUnit.HOURS))
+                .validTo(Instant.now().plus(24, java.time.temporal.ChronoUnit.HOURS))
+                .minOrderValue(new BigDecimal("100.00"))
+                .active(true)
+                .build();
+        discountRepository.save(discount);
+
+        // Setup inventory
+        InventoryItem inv = InventoryItem.builder()
+                .product(product1)
+                .warehouse(warehouse1)
+                .quantityOnHand(10)
+                .quantityReserved(0)
+                .build();
+        inventoryItemRepository.save(inv);
+
+        // Add item to cart
+        Cart cart = Cart.builder().customer(customerUser).status(CartStatus.ACTIVE).build();
+        cartRepository.save(cart);
+        CartItem item = CartItem.builder().cart(cart).product(product1).quantity(1).build();
+        cartItemRepository.save(item);
+
+        CheckoutRequest request = CheckoutRequest.builder()
+                .discountCode("FLAT50")
+                .build();
+
+        // Perform checkout
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .header("Authorization", "Bearer " + customerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.subtotal", is(1000.00)))
+                .andExpect(jsonPath("$.discountAmount", is(50.00)))
+                .andExpect(jsonPath("$.taxAmount", is(95.00))) // 10% of 950
+                .andExpect(jsonPath("$.totalAmount", is(1045.00)))
+                .andExpect(jsonPath("$.paymentStatus", is("SUCCESS")));
+    }
+
+    @Test
+    void testCheckoutWithInvalidDiscountCodeReturnsBadRequestAndRollsBack() throws Exception {
+        // Setup expired discount code
+        Discount discount = Discount.builder()
+                .code("EXPIRED")
+                .type(DiscountType.PERCENTAGE)
+                .value(new BigDecimal("10.00"))
+                .validFrom(Instant.now().minus(5, java.time.temporal.ChronoUnit.DAYS))
+                .validTo(Instant.now().minus(1, java.time.temporal.ChronoUnit.DAYS))
+                .minOrderValue(BigDecimal.ZERO)
+                .active(true)
+                .build();
+        discountRepository.save(discount);
+
+        // Setup inventory
+        InventoryItem inv = InventoryItem.builder()
+                .product(product1)
+                .warehouse(warehouse1)
+                .quantityOnHand(10)
+                .quantityReserved(0)
+                .build();
+        inventoryItemRepository.save(inv);
+
+        // Add item to cart
+        Cart cart = Cart.builder().customer(customerUser).status(CartStatus.ACTIVE).build();
+        cartRepository.save(cart);
+        CartItem item = CartItem.builder().cart(cart).product(product1).quantity(1).build();
+        cartItemRepository.save(item);
+
+        CheckoutRequest request = CheckoutRequest.builder()
+                .discountCode("EXPIRED")
+                .build();
+
+        // Perform checkout
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .header("Authorization", "Bearer " + customerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+
+        // Assert cart remains ACTIVE due to transaction rollback/compensation
+        Cart updatedCart = cartRepository.findById(cart.getId()).orElseThrow();
+        assertEquals(CartStatus.ACTIVE, updatedCart.getStatus());
+
+        // Assert order records are rolled back (not saved)
+        List<Order> orders = orderRepository.findAll();
+        assertTrue(orders.isEmpty());
+
+        // Assert inventory reservations are fully released/never registered
+        InventoryItem updatedInv = inventoryItemRepository.findByProductIdAndWarehouseId(product1.getId(), warehouse1.getId()).orElseThrow();
+        assertEquals(0, updatedInv.getQuantityReserved());
+    }
+
+    @Test
+    void testCheckoutAntiAbuseOnlyOneUse() throws Exception {
+        // Setup discount code
+        Discount discount = Discount.builder()
+                .code("SAVE10")
+                .type(DiscountType.PERCENTAGE)
+                .value(new BigDecimal("10.00"))
+                .validFrom(Instant.now().minus(1, java.time.temporal.ChronoUnit.HOURS))
+                .validTo(Instant.now().plus(24, java.time.temporal.ChronoUnit.HOURS))
+                .minOrderValue(BigDecimal.ZERO)
+                .active(true)
+                .build();
+        discountRepository.save(discount);
+
+        // Setup inventory
+        InventoryItem inv = InventoryItem.builder()
+                .product(product1)
+                .warehouse(warehouse1)
+                .quantityOnHand(10)
+                .quantityReserved(0)
+                .build();
+        inventoryItemRepository.save(inv);
+
+        // 1st order
+        Cart cart1 = Cart.builder().customer(customerUser).status(CartStatus.ACTIVE).build();
+        cartRepository.save(cart1);
+        CartItem item1 = CartItem.builder().cart(cart1).product(product1).quantity(1).build();
+        cartItemRepository.save(item1);
+
+        CheckoutRequest request = CheckoutRequest.builder()
+                .discountCode("SAVE10")
+                .build();
+
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .header("Authorization", "Bearer " + customerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+
+        // 2nd order (should fail validation because SAVE10 is already used by this customer)
+        Cart cart2 = Cart.builder().customer(customerUser).status(CartStatus.ACTIVE).build();
+        cartRepository.save(cart2);
+        CartItem item2 = CartItem.builder().cart(cart2).product(product1).quantity(1).build();
+        cartItemRepository.save(item2);
+
+        mockMvc.perform(post("/api/v1/orders/checkout")
+                        .header("Authorization", "Bearer " + customerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("already been used")));
+    }
+
     @org.junit.jupiter.api.AfterEach
     void tearDown() {
         paymentRepository.deleteAll();
@@ -531,5 +736,6 @@ class CheckoutControllerIntegrationTest {
         productRepository.deleteAll();
         categoryRepository.deleteAll();
         userRepository.deleteAll();
+        discountRepository.deleteAll();
     }
 }

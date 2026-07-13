@@ -5,9 +5,7 @@ import com.ecommerce.oms.domain.Product;
 import com.ecommerce.oms.domain.User;
 import com.ecommerce.oms.domain.UserRole;
 import com.ecommerce.oms.dto.ProductRequest;
-import com.ecommerce.oms.repository.CategoryRepository;
-import com.ecommerce.oms.repository.ProductRepository;
-import com.ecommerce.oms.repository.UserRepository;
+import com.ecommerce.oms.repository.*;
 import com.ecommerce.oms.security.JwtService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,6 +48,15 @@ class ProductControllerIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private OrderItemRepository orderItemRepository;
+
+    @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
     private JwtService jwtService;
 
     private String adminToken;
@@ -59,9 +66,13 @@ class ProductControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        paymentRepository.deleteAll();
+        orderItemRepository.deleteAll();
+        orderRepository.deleteAll();
         productRepository.deleteAll();
         categoryRepository.deleteAll();
         userRepository.deleteAll();
+        userRepository.flush();
 
         User admin = User.builder()
                 .name("Admin User")

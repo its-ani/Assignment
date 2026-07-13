@@ -51,6 +51,15 @@ class WarehouseControllerIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private OrderItemRepository orderItemRepository;
+
+    @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
     private JwtService jwtService;
 
     private String adminToken;
@@ -59,11 +68,15 @@ class WarehouseControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        paymentRepository.deleteAll();
+        orderItemRepository.deleteAll();
+        orderRepository.deleteAll();
         inventoryItemRepository.deleteAll();
         productRepository.deleteAll();
         categoryRepository.deleteAll();
         warehouseRepository.deleteAll();
         userRepository.deleteAll();
+        userRepository.flush();
 
         User admin = User.builder()
                 .name("Admin")
